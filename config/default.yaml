@@ -1,0 +1,58 @@
+# Default Trading Parameters
+# ===========================
+# 코인별 설정이 없을 때 사용되는 기본값
+
+# Leverage Settings
+leverage:
+  default: 3        # 기본 레버리지
+  max: 25           # 최대 허용 레버리지
+  margin_mode: isolated
+
+# Position Sizing
+position:
+  equity_pct: 0.03  # 자본의 3%
+
+# Execution (ATR 기반 SL/TP)
+execution:
+  atr_period: 14
+  atr_sl_mult: 2.0    # SL = entry +/- ATR * 2.0
+  atr_tp_mult: 3.0    # TP = entry +/- ATR * 3.0
+  max_hold_bars: 32   # 8시간 (15분봉 기준)
+  pending_order_max_bars: 4  # 1시간 미체결시 취소
+
+# Fees (Binance Futures)
+fees:
+  maker: 0.0002       # 0.02%
+  taker: 0.0005       # 0.05%
+  slippage: 0.0001    # 0.01%
+
+# Liquidation (v2.6.15)
+liquidation:
+  maint_margin_rate: 0.004  # 0.4%
+  liq_fee_rate: 0.0075      # 0.75%
+
+# Wyckoff Parameters (Theta)
+wyckoff:
+  pivot_lr: 5
+  box_L: 20
+  atr_len: 14
+  x_atr: 0.5
+  m_bw: 0.3
+  m_freeze: 5
+  N_reclaim: 3
+  N_fill: 3
+  F_min: 0.5
+
+# HMM Filter
+hmm:
+  transition_delta: 0.40
+  cooldown_bars: 1
+  var_target: 0.015
+  size_min: 0.5
+  size_max: 1.5
+  long_permit_enabled: true
+  long_permit_states:
+    - markup
+    - accumulation
+    - re_accumulation
+  short_permit_enabled: false

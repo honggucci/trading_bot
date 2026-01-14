@@ -1,0 +1,22 @@
+# SOL-USDT Trading Parameters
+# ============================
+# TODO: 백테스트 후 최적화 필요
+
+symbol: SOL-USDT
+enabled: false  # 백테스트 전까지 비활성화
+
+# Leverage - 기본값 (SOL은 변동성 매우 높음)
+leverage:
+  default: 3        # 매우 보수적 시작
+  max: 5
+
+# SOL 특화 설정 (추정치 - 백테스트 필요)
+execution:
+  atr_sl_mult: 1.2  # 변동성 매우 높음 -> 매우 좁은 SL
+  atr_tp_mult: 2.0
+  max_hold_bars: 16  # 빠른 청산 (펀딩비 + 변동성)
+
+# 백테스트 TODO
+backtest_stats:
+  status: "NOT_TESTED"
+  notes: "SOL 변동성 때문에 레버리지 낮게 시작"

@@ -1,0 +1,32 @@
+# BTC-USDT Trading Parameters
+# ============================
+# 백테스트 결과 기반 최적화 (v2.6.15)
+# 2024년 테스트: +$920 (143 trades, 3x leverage)
+
+symbol: BTC-USDT
+enabled: true
+
+# Leverage - 백테스트 결과
+# 3x: +$920, 청산 0회
+# 10x: +$3,047, 청산 0회
+# 15x: +$4,548, 청산 0회
+# 25x: +$7,502, 청산 0회
+leverage:
+  default: 10       # 안정성 + 수익 균형
+  max: 15           # 리스크 허용 시
+  aggressive: 25    # 고위험 (청산거리 3.6%)
+
+# BTC 특화 실행 설정
+execution:
+  atr_sl_mult: 2.0
+  atr_tp_mult: 3.0
+  max_hold_bars: 32
+
+# 백테스트 통계 (참고용)
+backtest_stats:
+  period: "2024"
+  trades: 143
+  win_rate: 45.5
+  sl_rate: 46.9
+  tp_rate: 33.6
+  time_stop_rate: 19.6

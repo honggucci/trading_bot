@@ -1,0 +1,29 @@
+# ETH-USDT Trading Parameters
+# ============================
+# 자동 최적화 결과 (v2.6.15)
+# 최적화 날짜: 2026-01-14 11:05
+
+symbol: ETH-USDT
+enabled: true  # 최적화 완료 - 활성화
+
+# Leverage - 최적화 결과
+leverage:
+  default: 10
+  max: 20
+
+# ETH 최적화된 실행 설정
+execution:
+  atr_sl_mult: 1.5
+  atr_tp_mult: 2.0
+  max_hold_bars: 32
+  pending_order_max_bars: 4
+
+# 백테스트 결과
+backtest_stats:
+  period: "2024"
+  total_pnl: 122946.25
+  trades: 224
+  win_rate: 43.8
+  sl_rate: 54.5
+  tp_rate: 40.2
+  optimized_at: "2026-01-14T11:05:38.753020"
