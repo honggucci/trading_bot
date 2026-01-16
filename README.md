@@ -107,4 +107,4 @@ trading_bot/
 
 ## Author
 
-- Hattz (하홍구)
+- Hattzé (하홍구)

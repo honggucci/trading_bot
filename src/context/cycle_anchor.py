@@ -9,12 +9,20 @@ Cycle Anchor - Bitcoin Halving Cycle Based Fibonacci
 - 폭락 시 전 사이클 ATH가 지지선 역할
 - 사이클 고점/저점으로 Fib 0/1 고정
 
+1W Fib 앵커 (v2.0):
+- Fib 0 = $3,120 (2018년 저점)
+- Fib 1 = $20,650 (2017/18년 고점)
+- 모든 TF의 기준점 (절대 불변)
+
 사용법:
 ```python
-from src.context.cycle_anchor import get_btc_cycle_anchor, get_fib_levels
+from src.context.cycle_anchor import get_btc_cycle_anchor, get_fib_levels, get_1w_fib_level
 
 # 현재 사이클 앵커 가져오기
 anchor = get_btc_cycle_anchor()
+
+# 1W Fib 레벨 계산 (절대 기준)
+fib_level = get_1w_fib_level(95000)  # 5.24
 
 # Fib 레벨 계산
 levels = get_fib_levels(anchor.cycle_low, anchor.cycle_high)
@@ -27,9 +35,140 @@ support = anchor.get_crash_support()  # $69,000
 ```
 """
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
+from pathlib import Path
+import json
 import numpy as np
+
+
+# ============================================================================
+# 1W Fib Anchor (절대 불변 기준점)
+# ============================================================================
+
+# 1W Fib 앵커 기본값 (JSON 로드 실패 시 사용)
+_DEFAULT_1W_ANCHOR = {
+    "fib_0": 3120,
+    "fib_1": 20650,
+    "range": 17530,
+}
+
+# 캐시된 1W 앵커
+_1W_ANCHOR_CACHE: Optional[Dict[str, Any]] = None
+
+
+def load_1w_fib_anchor(force_reload: bool = False) -> Dict[str, Any]:
+    """
+    1W Fib 앵커 JSON 로드
+
+    Args:
+        force_reload: 캐시 무시하고 다시 로드
+
+    Returns:
+        {
+            "anchor": {"fib_0": 3120, "fib_1": 20650, "range": 17530},
+            "levels": {"0.618": 13952, "3.618": 66549, ...},
+            "key_levels": [...]
+        }
+    """
+    global _1W_ANCHOR_CACHE
+
+    if _1W_ANCHOR_CACHE is not None and not force_reload:
+        return _1W_ANCHOR_CACHE
+
+    # JSON 파일 경로
+    config_path = Path(__file__).parent.parent.parent / "config" / "fib_1w_anchor.json"
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            _1W_ANCHOR_CACHE = data
+            return data
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        # 기본값 반환
+        return {"anchor": _DEFAULT_1W_ANCHOR, "levels": {}, "key_levels": []}
+
+
+def get_1w_fib_level(price: float) -> float:
+    """
+    현재가의 1W Fib 레벨 계산 (절대 기준)
+
+    Formula: fib_level = (price - fib_0) / range
+
+    Args:
+        price: 현재가 (USD)
+
+    Returns:
+        Fib 레벨 (예: 5.24)
+
+    Example:
+        >>> get_1w_fib_level(95000)
+        5.24
+    """
+    data = load_1w_fib_anchor()
+    anchor = data.get("anchor", _DEFAULT_1W_ANCHOR)
+    fib_0 = anchor["fib_0"]
+    fib_range = anchor["range"]
+    return (price - fib_0) / fib_range
+
+
+def get_1w_fib_price(fib_level: float) -> float:
+    """
+    1W Fib 레벨에 해당하는 가격 계산
+
+    Formula: price = fib_0 + (fib_level * range)
+
+    Args:
+        fib_level: Fib 레벨 (예: 3.618)
+
+    Returns:
+        가격 (USD)
+
+    Example:
+        >>> get_1w_fib_price(3.618)
+        66549
+    """
+    data = load_1w_fib_anchor()
+    anchor = data.get("anchor", _DEFAULT_1W_ANCHOR)
+    fib_0 = anchor["fib_0"]
+    fib_range = anchor["range"]
+    return fib_0 + (fib_level * fib_range)
+
+
+def get_1w_key_levels() -> Dict[str, float]:
+    """
+    1W Fib 주요 레벨 가격 반환
+
+    Returns:
+        {"0.702": 15430, "3.618": 66549, "3.786": 69493, ...}
+    """
+    data = load_1w_fib_anchor()
+    return data.get("levels", {})
+
+
+def get_1w_nearest_level(price: float, tolerance_pct: float = 0.03) -> Optional[str]:
+    """
+    현재가에 가장 가까운 1W Fib 레벨 찾기
+
+    Args:
+        price: 현재가 (USD)
+        tolerance_pct: 허용 오차 (3%)
+
+    Returns:
+        Fib 레벨 문자열 (예: "3.618") 또는 None
+    """
+    levels = get_1w_key_levels()
+    current_fib = get_1w_fib_level(price)
+
+    for level_str, level_price in levels.items():
+        try:
+            level_fib = float(level_str)
+            if abs(current_fib - level_fib) / max(level_fib, 0.001) <= tolerance_pct:
+                return level_str
+        except ValueError:
+            continue
+
+    return None
 
 
 # ============================================================================
@@ -411,3 +550,197 @@ def get_eth_cycle_anchor(cycle_num: int = 2) -> CycleAnchor:
         prev_cycle_high_date=prev.cycle_high_date if prev else "",
         halving_date=current.halving_date,
     )
+
+
+# ============================================================================
+# Fractal Fib Levels (L0, L1)
+# ============================================================================
+
+# 1W Fib 앵커 (고정)
+FIB_0 = 3120
+FIB_1 = 20650
+RANGE = FIB_1 - FIB_0  # 17530
+
+# 표준 피보나치 비율
+STANDARD_RATIOS = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+
+# 확장 Fib 최대값 (Fib 8.0 = $143,360)
+EXTENDED_FIB_MAX = 8
+
+
+@dataclass
+class FibLevel:
+    """순수 Fib 레벨 (Zone Width 없음)"""
+    fib_ratio: float      # 전체 Fib 비율 (예: 5.236)
+    price: float          # 가격
+    depth: int            # 프랙탈 깊이 (0=L0, 1=L1)
+    cell: Tuple[int, int]  # 소속 셀 (fib_int_low, fib_int_high)
+
+
+def fib_to_price(fib_ratio: float, cell_low: float = FIB_0, cell_high: float = None) -> float:
+    """
+    Fib 비율 → 가격 변환
+
+    Args:
+        fib_ratio: 0~1 사이 비율
+        cell_low: 셀 하단 가격
+        cell_high: 셀 상단 가격 (None이면 1W 기준)
+    """
+    if cell_high is None:
+        cell_high = cell_low + RANGE
+    cell_range = cell_high - cell_low
+    return cell_low + (fib_ratio * cell_range)
+
+
+def price_to_fib(price: float) -> float:
+    """
+    가격 → 전체 Fib 레벨 변환
+
+    Example:
+        >>> price_to_fib(95000)
+        5.24
+    """
+    return (price - FIB_0) / RANGE
+
+
+def get_fractal_fib_levels(
+    price_range: Tuple[float, float],
+    max_depth: int = 2,
+) -> List[FibLevel]:
+    """
+    프랙탈 Fib 레벨 생성 (순수 가격, Zone Width 없음)
+
+    Args:
+        price_range: (min_price, max_price) - 생성할 가격 범위
+        max_depth: 프랙탈 깊이 (0=L0만, 1=L0+L1, 2=L0+L1+L2)
+
+    Returns:
+        List[FibLevel] - 가격순 정렬
+
+    Example:
+        >>> levels = get_fractal_fib_levels((90000, 100000), max_depth=2)
+        >>> for lvl in levels:
+        ...     print(f"Fib {lvl.fib_ratio:.3f}: ${lvl.price:,.0f} (L{lvl.depth})")
+    """
+    levels = []
+
+    # 정수 Fib 간격마다 (0~1, 1~2, ..., 7~8)
+    for fib_int in range(EXTENDED_FIB_MAX):
+        cell_low_price = FIB_0 + (fib_int * RANGE)
+        cell_high_price = FIB_0 + ((fib_int + 1) * RANGE)
+
+        # 가격 범위와 겹치지 않으면 스킵
+        if cell_high_price < price_range[0] or cell_low_price > price_range[1]:
+            continue
+
+        # L0: 이 셀 내의 표준 Fib 레벨
+        for ratio in STANDARD_RATIOS:
+            price = fib_to_price(ratio, cell_low_price, cell_high_price)
+
+            if price_range[0] <= price <= price_range[1]:
+                full_fib = fib_int + ratio
+                levels.append(FibLevel(
+                    fib_ratio=full_fib,
+                    price=price,
+                    depth=0,
+                    cell=(fib_int, fib_int + 1),
+                ))
+
+        # L1: 각 L0 셀 내부를 다시 분할
+        if max_depth >= 1:
+            for i in range(len(STANDARD_RATIOS) - 1):
+                sub_low_ratio = STANDARD_RATIOS[i]
+                sub_high_ratio = STANDARD_RATIOS[i + 1]
+
+                sub_low_price = fib_to_price(sub_low_ratio, cell_low_price, cell_high_price)
+                sub_high_price = fib_to_price(sub_high_ratio, cell_low_price, cell_high_price)
+
+                # 가격 범위와 겹치지 않으면 스킵
+                if sub_high_price < price_range[0] or sub_low_price > price_range[1]:
+                    continue
+
+                # L1 레벨 생성 (0.0, 1.0 제외 - L0과 중복)
+                for sub_ratio in STANDARD_RATIOS[1:-1]:
+                    price = fib_to_price(sub_ratio, sub_low_price, sub_high_price)
+
+                    if price_range[0] <= price <= price_range[1]:
+                        # 전체 Fib 비율 계산
+                        cell_ratio = sub_low_ratio + sub_ratio * (sub_high_ratio - sub_low_ratio)
+                        full_fib = fib_int + cell_ratio
+
+                        levels.append(FibLevel(
+                            fib_ratio=full_fib,
+                            price=price,
+                            depth=1,
+                            cell=(fib_int, fib_int + 1),
+                        ))
+
+                # L2: L1 셀 내부를 다시 분할
+                if max_depth >= 2:
+                    for j in range(len(STANDARD_RATIOS) - 1):
+                        l1_low_ratio = STANDARD_RATIOS[j]
+                        l1_high_ratio = STANDARD_RATIOS[j + 1]
+
+                        l2_low_price = fib_to_price(l1_low_ratio, sub_low_price, sub_high_price)
+                        l2_high_price = fib_to_price(l1_high_ratio, sub_low_price, sub_high_price)
+
+                        # 가격 범위와 겹치지 않으면 스킵
+                        if l2_high_price < price_range[0] or l2_low_price > price_range[1]:
+                            continue
+
+                        # L2 레벨 생성 (0.0, 1.0 제외)
+                        for l2_ratio in STANDARD_RATIOS[1:-1]:
+                            price = fib_to_price(l2_ratio, l2_low_price, l2_high_price)
+
+                            if price_range[0] <= price <= price_range[1]:
+                                # 전체 Fib 비율 계산
+                                l1_cell_ratio = l1_low_ratio + l2_ratio * (l1_high_ratio - l1_low_ratio)
+                                cell_ratio = sub_low_ratio + l1_cell_ratio * (sub_high_ratio - sub_low_ratio)
+                                full_fib = fib_int + cell_ratio
+
+                                levels.append(FibLevel(
+                                    fib_ratio=full_fib,
+                                    price=price,
+                                    depth=2,
+                                    cell=(fib_int, fib_int + 1),
+                                ))
+
+    # 가격순 정렬, 중복 제거
+    levels.sort(key=lambda x: x.price)
+
+    # 중복 제거 (가격 기준 0.01% 이내)
+    unique_levels = []
+    for lvl in levels:
+        if not unique_levels or abs(lvl.price - unique_levels[-1].price) / lvl.price > 0.0001:
+            unique_levels.append(lvl)
+
+    return unique_levels
+
+
+def get_nearby_fib_levels(
+    price: float,
+    count: int = 5,
+    max_depth: int = 1,
+) -> Dict[str, List[FibLevel]]:
+    """
+    현재가 근처의 Fib 레벨 반환
+
+    Args:
+        price: 현재가
+        count: 위/아래 각각 몇 개씩
+        max_depth: 프랙탈 깊이
+
+    Returns:
+        {"above": [...], "below": [...]}
+    """
+    # 현재가 ±30% 범위에서 레벨 생성
+    margin = price * 0.3
+    levels = get_fractal_fib_levels(
+        price_range=(price - margin, price + margin),
+        max_depth=max_depth,
+    )
+
+    above = [lvl for lvl in levels if lvl.price > price][:count]
+    below = [lvl for lvl in levels if lvl.price < price][-count:]
+
+    return {"above": above, "below": below}

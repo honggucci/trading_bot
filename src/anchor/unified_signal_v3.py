@@ -75,6 +75,12 @@ class UnifiedSignalV3:
     # Regime
     regime: str
 
+    # === 기본값 있는 필드 (아래로) ===
+
+    # 진입 가격 (limit order용)
+    limit_price: Optional[float] = None  # 지정가 진입 가격 (존 중심)
+    current_price: Optional[float] = None  # 현재 시장가 (참고용)
+
     # Exit Levels
     exit_levels: Optional[ExitLevels] = None
 
@@ -288,12 +294,13 @@ def check_unified_long_signal_v3(
         warnings.append(f"Confluence analysis error: {e}")
         confluence_result = ConfluenceResult(success=False, error=str(e))
 
-    # 6. Legacy 점수 추출
+    # 6. Legacy 점수 추출 + 지정가 계산
     legacy_score = 0.0
     is_in_zone = False
     zone_label = None
     is_reg_now = False
     is_hid_now = False
+    limit_price = None  # 지정가 진입 가격 (존 중심)
 
     if confluence_result.success:
         is_in_zone = confluence_result.is_in_zone
@@ -303,6 +310,11 @@ def check_unified_long_signal_v3(
         if confluence_result.current_zone:
             legacy_score = confluence_result.current_zone.score
             zone_label = confluence_result.current_zone.zone.label
+            # 지정가 = 존 중심 가격 (다이버전스 존)
+            limit_price = confluence_result.current_zone.zone.price
+
+    # 현재 시장가 (참고용)
+    current_price = float(df_15m['close'].iloc[-1])
 
     # 7. 최종 Confidence = Legacy + MTF Boost
     final_confidence = legacy_score + mtf_boost
@@ -315,21 +327,22 @@ def check_unified_long_signal_v3(
     # 9. 최종 결정
     all_conditions_met = confluence_ok and hmm_ok and divergence_ok
 
-    # 10. Exit Levels 계산 (진입 허용 시)
+    # 10. Exit Levels 계산 (진입 허용 시, limit_price 기준)
     exit_levels = None
     if all_conditions_met and include_exit_levels:
         try:
-            current_price = float(df_15m['close'].iloc[-1])
+            # 진입가 = limit_price (지정가) 또는 current_price (fallback)
+            entry_price = limit_price if limit_price else current_price
 
             # ATR fallback with warning
             if 'atr' in df_15m.columns:
                 atr = float(df_15m['atr'].iloc[-1])
             else:
-                atr = current_price * 0.02
+                atr = entry_price * 0.02
                 warnings.append(f"ATR column missing, using 2% fallback (${atr:,.0f})")
 
             exit_levels = calc_exit_levels(
-                entry_price=current_price,
+                entry_price=entry_price,
                 side='long',
                 atr=atr,
                 confluence_zones=confluence_zones,
@@ -363,6 +376,10 @@ def check_unified_long_signal_v3(
         is_hid_now=is_hid_now,
 
         regime=regime,
+
+        # 진입 가격
+        limit_price=limit_price if all_conditions_met else None,
+        current_price=current_price,
 
         exit_levels=exit_levels,
 
@@ -470,12 +487,13 @@ def check_unified_short_signal_v3(
     # Short confidence = StochRSI / 100 + MTF Boost
     confidence = (stochrsi_d / 100 + mtf_boost) if all_conditions_met else 0.0
 
-    # 7. Exit Levels
+    # 7. 현재 시장가
+    current_price = float(df_15m['close'].iloc[-1])
+
+    # 8. Exit Levels (Short은 시장가 진입)
     exit_levels = None
     if all_conditions_met and include_exit_levels:
         try:
-            current_price = float(df_15m['close'].iloc[-1])
-
             # ATR fallback with warning
             if 'atr' in df_15m.columns:
                 atr = float(df_15m['atr'].iloc[-1])
@@ -518,6 +536,10 @@ def check_unified_short_signal_v3(
 
         regime=regime,
 
+        # 진입 가격 (Short은 시장가)
+        limit_price=current_price if all_conditions_met else None,
+        current_price=current_price,
+
         exit_levels=exit_levels,
 
         warnings=warnings,
@@ -545,6 +567,10 @@ def format_signal_v3(signal: UnifiedSignalV3) -> str:
         f"Allowed: {signal.allowed}",
         f"Confidence: {signal.confidence:.2f} (Legacy: {signal.legacy_score:.2f} + MTF: {signal.mtf_boost:.2f})",
         f"Size Mult: {signal.size_mult:.2f}",
+        "",
+        "--- Entry Price ---",
+        f"Limit Price: ${signal.limit_price:,.0f}" if signal.limit_price else "Limit Price: N/A",
+        f"Current Price: ${signal.current_price:,.0f}" if signal.current_price else "Current Price: N/A",
         "",
         "--- Legacy Confluence ---",
         f"In Zone: {signal.is_in_zone}",

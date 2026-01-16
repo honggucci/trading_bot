@@ -1,0 +1,97 @@
+{
+  "name": "Zone Width Configuration",
+  "description": "Fib Zone 폭 결정 파라미터 - 운영용 고정값",
+  "version": "2.0.0",
+  "created_at": "2026-01-15",
+  "updated_at": "2026-01-15",
+  "methodology": {
+    "formula": "zone_width = ATR(window) * k, clamped",
+    "basis": "IS/OOS 분할 검증, 커버리지 50% 기준",
+    "note": "1D는 OOS 성능 손실(-29%)로 인해 예외 처리"
+  },
+  "fib_anchor_1w": {
+    "fib_0": 3120,
+    "fib_1": 20650,
+    "range": 17530,
+    "scale": "linear",
+    "data_source": "binance_futures",
+    "note": "2017 ATH 기준, 데이터 소스 고정 필수"
+  },
+  "tf_params": {
+    "1w": {
+      "atr_window": null,
+      "k": null,
+      "role": "fib_coordinate_only",
+      "note": "OOS 검증 불가(365봉), Fib 좌표계로만 사용, Zone Width 계산 제외"
+    },
+    "1d": {
+      "atr_window": 89,
+      "k": 1.0,
+      "role": "htf_filter",
+      "note": "HTF 필터 역할, 긴 윈도우로 안정성 확보"
+    },
+    "4h": {
+      "atr_window": 21,
+      "k": 1.65,
+      "role": "context_filter",
+      "note": "Context 필터만, 트리거로 사용 금지"
+    },
+    "1h": {
+      "atr_window": 21,
+      "k": 2.4,
+      "role": "context_filter",
+      "note": "Context 필터만, 트리거로 사용 금지"
+    },
+    "15m": {
+      "atr_window": 21,
+      "k": 2.75,
+      "role": "zone_generator",
+      "note": "Zone 생성 TF, 최적(89) 대비 -4.6%"
+    }
+  },
+  "clamp": {
+    "1d": {"min_pct": 0.005, "max_pct": 0.03},
+    "4h": {"min_pct": 0.005, "max_pct": 0.03},
+    "1h": {"min_pct": 0.002, "max_pct": 0.015},
+    "15m": {"min_pct": 0.002, "max_pct": 0.015}
+  },
+  "risk_module": {
+    "method": "ewma",
+    "lambda": 0.94,
+    "use_for": ["position_sizing", "regime_detection"],
+    "not_for": ["zone_width"]
+  },
+  "validation": {
+    "oos_correlation": {
+      "1d_atr89": 0.22,
+      "4h_atr21": 0.29,
+      "1h_atr21": 0.40,
+      "15m_atr21": 0.42
+    },
+    "is_oos_match": {
+      "1d": false,
+      "4h": true,
+      "1h": false,
+      "15m": true
+    }
+  },
+  "usage_rules": {
+    "zone_generator": "15m - Zone 생성, 5m 트리거 대기",
+    "context_filter": "4H/1H - 15m Zone 트레이드의 허용/비허용 필터만",
+    "htf_filter": "1D - 전체 방향성 필터",
+    "fib_coordinate": "1W - Fib 좌표계만, Zone Width 계산 안함",
+    "grade_example": {
+      "A급": "15m Zone + 1H Zone 둘다 안",
+      "B급": "15m Zone만 안, 1H는 밖"
+    }
+  },
+  "recalibration": {
+    "trigger": "3개월 롤링 Coverage < 40% or > 60%",
+    "monitor_script": "scripts/monitor_zone_coverage.py",
+    "experiment_script": "scripts/experiment_atr_all_tf_oos.py",
+    "change_condition": "OOS Pearson +10% 이상 개선시만",
+    "do_not_change_for": ["몇 번 손실", "느낌", "새 논문"]
+  },
+  "do_not_change": true,
+  "reason": "IS/OOS 검증 완료. k는 절대 자주 건드리지 마."
+}

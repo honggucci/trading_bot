@@ -1,0 +1,3907 @@
+{
+  "anchor": {
+    "fib_0": 3120,
+    "fib_1": 20650,
+    "range": 17530
+  },
+  "levels": {
+    "master": [
+      {
+        "fib": 0.0,
+        "price": 3120,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 0.236,
+        "price": 7257.08,
+        "level_type": "master",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.382,
+        "price": 9816.46,
+        "level_type": "master",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 0.5,
+        "price": 11885.0,
+        "level_type": "master",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 0.618,
+        "price": 13953.54,
+        "level_type": "master",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 0.702,
+        "price": 15426.06,
+        "level_type": "master_special",
+        "parent_range": [
+          0,
+          1
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 0.786,
+        "price": 16898.58,
+        "level_type": "master",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 1.0,
+        "price": 20650,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 1.236,
+        "price": 24787.08,
+        "level_type": "master",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.3820000000000001,
+        "price": 27346.46,
+        "level_type": "master",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 1.5,
+        "price": 29415.0,
+        "level_type": "master",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 1.6179999999999999,
+        "price": 31483.54,
+        "level_type": "master",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 1.786,
+        "price": 34428.58,
+        "level_type": "master",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 2.0,
+        "price": 38180,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 2.2359999999999998,
+        "price": 42317.08,
+        "level_type": "master",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.382,
+        "price": 44876.46,
+        "level_type": "master",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 2.5,
+        "price": 46945.0,
+        "level_type": "master",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 2.618,
+        "price": 49013.54,
+        "level_type": "master",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 2.786,
+        "price": 51958.58,
+        "level_type": "master",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 3.0,
+        "price": 55710,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 3.2359999999999998,
+        "price": 59847.08,
+        "level_type": "master",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.382,
+        "price": 62406.46,
+        "level_type": "master",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 3.5,
+        "price": 64475.0,
+        "level_type": "master",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 3.618,
+        "price": 66543.54,
+        "level_type": "master",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 3.786,
+        "price": 69488.58,
+        "level_type": "master",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 4.0,
+        "price": 73240,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 4.236,
+        "price": 77377.08,
+        "level_type": "master",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.382,
+        "price": 79936.46,
+        "level_type": "master",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 4.5,
+        "price": 82005.0,
+        "level_type": "master",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 4.618,
+        "price": 84073.54,
+        "level_type": "master",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 4.786,
+        "price": 87018.58,
+        "level_type": "master",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 5.0,
+        "price": 90770,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 5.236,
+        "price": 94907.08,
+        "level_type": "master",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.382,
+        "price": 97466.46,
+        "level_type": "master",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 5.5,
+        "price": 99535.0,
+        "level_type": "master",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 5.618,
+        "price": 101603.54,
+        "level_type": "master",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 5.786,
+        "price": 104548.58,
+        "level_type": "master",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 6.0,
+        "price": 108300,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 6.236,
+        "price": 112437.08,
+        "level_type": "master",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.382,
+        "price": 114996.46,
+        "level_type": "master",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 6.5,
+        "price": 117065.0,
+        "level_type": "master",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 6.618,
+        "price": 119133.54,
+        "level_type": "master",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 6.786,
+        "price": 122078.58,
+        "level_type": "master",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 7.0,
+        "price": 125830,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      },
+      {
+        "fib": 7.236,
+        "price": 129967.08,
+        "level_type": "master",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.382,
+        "price": 132526.46,
+        "level_type": "master",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 7.5,
+        "price": 134595.0,
+        "level_type": "master",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 7.618,
+        "price": 136663.54,
+        "level_type": "master",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 4
+      },
+      {
+        "fib": 7.786,
+        "price": 139608.58,
+        "level_type": "master",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 8.0,
+        "price": 143360,
+        "level_type": "master",
+        "parent_range": [
+          3120,
+          Infinity
+        ],
+        "strength": 5
+      }
+    ],
+    "sub_l1": [
+      {
+        "fib": 0.0,
+        "price": 3120.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 0.236,
+        "price": 7257.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.382,
+        "price": 9816.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 0.5,
+        "price": 11885.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.618,
+        "price": 13953.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 0.786,
+        "price": 16898.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.0,
+        "price": 20650.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          0.0,
+          1.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 1.236,
+        "price": 24787.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.382,
+        "price": 27346.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 1.5,
+        "price": 29415.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.618,
+        "price": 31483.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 1.786,
+        "price": 34428.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.0,
+        "price": 38180.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          1.0,
+          2.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 2.236,
+        "price": 42317.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.382,
+        "price": 44876.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 2.5,
+        "price": 46945.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.618,
+        "price": 49013.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 2.786,
+        "price": 51958.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.0,
+        "price": 55710.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          2.0,
+          3.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 3.236,
+        "price": 59847.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.382,
+        "price": 62406.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 3.5,
+        "price": 64475.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.618,
+        "price": 66543.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 3.786,
+        "price": 69488.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.0,
+        "price": 73240.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          3.0,
+          4.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 4.236,
+        "price": 77377.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.382,
+        "price": 79936.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 4.5,
+        "price": 82005.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.618,
+        "price": 84073.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 4.786,
+        "price": 87018.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.0,
+        "price": 90770.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          4.0,
+          5.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 5.236,
+        "price": 94907.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.382,
+        "price": 97466.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 5.5,
+        "price": 99535.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.618,
+        "price": 101603.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 5.786,
+        "price": 104548.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.0,
+        "price": 108300.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          5.0,
+          6.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 6.236,
+        "price": 112437.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.382,
+        "price": 114996.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 6.5,
+        "price": 117065.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.618,
+        "price": 119133.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 6.786,
+        "price": 122078.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.0,
+        "price": 125830.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          6.0,
+          7.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 7.236,
+        "price": 129967.08,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.382,
+        "price": 132526.46,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 7.5,
+        "price": 134595.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.618,
+        "price": 136663.54,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 3
+      },
+      {
+        "fib": 7.786,
+        "price": 139608.58,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 8.0,
+        "price": 143360.0,
+        "level_type": "sub_l1",
+        "parent_range": [
+          7.0,
+          8.0
+        ],
+        "strength": 3
+      }
+    ],
+    "sub_l2": [
+      {
+        "fib": 0,
+        "price": 3120,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.118,
+        "price": 5188.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.191,
+        "price": 6468.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.25,
+        "price": 7502.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.309,
+        "price": 8536.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.393,
+        "price": 10009.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.5,
+        "price": 11885.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0,
+          0.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.618,
+        "price": 13953.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.691,
+        "price": 15233.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.75,
+        "price": 16267.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.809,
+        "price": 17301.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 0.893,
+        "price": 18774.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.0,
+        "price": 20650.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          0.5,
+          1.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.118,
+        "price": 22718.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.191,
+        "price": 23998.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.25,
+        "price": 25032.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.309,
+        "price": 26066.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.393,
+        "price": 27539.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.5,
+        "price": 29415.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1,
+          1.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.618,
+        "price": 31483.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.691,
+        "price": 32763.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.75,
+        "price": 33797.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.809,
+        "price": 34831.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 1.893,
+        "price": 36304.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.0,
+        "price": 38180.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          1.5,
+          2.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.118,
+        "price": 40248.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.191,
+        "price": 41528.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.25,
+        "price": 42562.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.309,
+        "price": 43596.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.393,
+        "price": 45069.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.5,
+        "price": 46945.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2,
+          2.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.618,
+        "price": 49013.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.691,
+        "price": 50293.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.75,
+        "price": 51327.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.809,
+        "price": 52361.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 2.893,
+        "price": 53834.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.0,
+        "price": 55710.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          2.5,
+          3.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.118,
+        "price": 57778.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.191,
+        "price": 59058.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.25,
+        "price": 60092.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.309,
+        "price": 61126.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.393,
+        "price": 62599.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.5,
+        "price": 64475.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3,
+          3.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.618,
+        "price": 66543.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.691,
+        "price": 67823.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.75,
+        "price": 68857.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.809,
+        "price": 69891.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 3.893,
+        "price": 71364.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.0,
+        "price": 73240.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          3.5,
+          4.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.118,
+        "price": 75308.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.191,
+        "price": 76588.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.25,
+        "price": 77622.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.309,
+        "price": 78656.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.393,
+        "price": 80129.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.5,
+        "price": 82005.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4,
+          4.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.618,
+        "price": 84073.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.691,
+        "price": 85353.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.75,
+        "price": 86387.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.809,
+        "price": 87421.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 4.893,
+        "price": 88894.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.0,
+        "price": 90770.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          4.5,
+          5.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.118,
+        "price": 92838.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.191,
+        "price": 94118.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.25,
+        "price": 95152.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.309,
+        "price": 96186.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.393,
+        "price": 97659.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.5,
+        "price": 99535.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5,
+          5.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.618,
+        "price": 101603.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.691,
+        "price": 102883.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.75,
+        "price": 103917.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.809,
+        "price": 104951.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 5.893,
+        "price": 106424.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.0,
+        "price": 108300.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          5.5,
+          6.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.118,
+        "price": 110368.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.191,
+        "price": 111648.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.25,
+        "price": 112682.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.309,
+        "price": 113716.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.393,
+        "price": 115189.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.5,
+        "price": 117065.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6,
+          6.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.618,
+        "price": 119133.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.691,
+        "price": 120413.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.75,
+        "price": 121447.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.809,
+        "price": 122481.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 6.893,
+        "price": 123954.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.0,
+        "price": 125830.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          6.5,
+          7.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.118,
+        "price": 127898.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.191,
+        "price": 129178.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.25,
+        "price": 130212.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.309,
+        "price": 131246.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.393,
+        "price": 132719.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.5,
+        "price": 134595.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7,
+          7.5
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.618,
+        "price": 136663.54,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.691,
+        "price": 137943.23,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.75,
+        "price": 138977.5,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.809,
+        "price": 140011.77,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 2
+      },
+      {
+        "fib": 7.893,
+        "price": 141484.29,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 8.0,
+        "price": 143360.0,
+        "level_type": "sub_l2",
+        "parent_range": [
+          7.5,
+          8.0
+        ],
+        "strength": 2
+      }
+    ],
+    "sub_l3": [
+      {
+        "fib": 0,
+        "price": 3120,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.059,
+        "price": 4154.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.0955,
+        "price": 4794.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.125,
+        "price": 5311.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.1545,
+        "price": 5828.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.1965,
+        "price": 6564.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.25,
+        "price": 7502.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0,
+          0.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.309,
+        "price": 8536.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.3455,
+        "price": 9176.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.375,
+        "price": 9693.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.4045,
+        "price": 10210.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.4465,
+        "price": 10947.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.5,
+        "price": 11885.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.25,
+          0.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.559,
+        "price": 12919.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.5955,
+        "price": 13559.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.625,
+        "price": 14076.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.6545,
+        "price": 14593.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.6965,
+        "price": 15329.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.75,
+        "price": 16267.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.5,
+          0.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.809,
+        "price": 17301.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.8455,
+        "price": 17941.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.875,
+        "price": 18458.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.9045,
+        "price": 18975.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 0.9465,
+        "price": 19712.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.0,
+        "price": 20650.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          0.75,
+          1.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.059,
+        "price": 21684.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.0955,
+        "price": 22324.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.125,
+        "price": 22841.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.1545,
+        "price": 23358.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.1965,
+        "price": 24094.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.25,
+        "price": 25032.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1,
+          1.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.309,
+        "price": 26066.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.3455,
+        "price": 26706.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.375,
+        "price": 27223.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.4045,
+        "price": 27740.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.4465,
+        "price": 28477.14,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.5,
+        "price": 29415.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.25,
+          1.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.559,
+        "price": 30449.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.5955,
+        "price": 31089.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.625,
+        "price": 31606.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.6545,
+        "price": 32123.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.6965,
+        "price": 32859.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.75,
+        "price": 33797.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.5,
+          1.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.809,
+        "price": 34831.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.8455,
+        "price": 35471.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.875,
+        "price": 35988.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.9045,
+        "price": 36505.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 1.9465,
+        "price": 37242.14,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.0,
+        "price": 38180.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          1.75,
+          2.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.059,
+        "price": 39214.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.0955,
+        "price": 39854.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.125,
+        "price": 40371.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.1545,
+        "price": 40888.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.1965,
+        "price": 41624.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.25,
+        "price": 42562.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2,
+          2.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.309,
+        "price": 43596.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.3455,
+        "price": 44236.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.375,
+        "price": 44753.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.4045,
+        "price": 45270.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.4465,
+        "price": 46007.14,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.5,
+        "price": 46945.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.25,
+          2.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.559,
+        "price": 47979.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.5955,
+        "price": 48619.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.625,
+        "price": 49136.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.6545,
+        "price": 49653.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.6965,
+        "price": 50389.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.75,
+        "price": 51327.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.5,
+          2.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.809,
+        "price": 52361.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.8455,
+        "price": 53001.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.875,
+        "price": 53518.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.9045,
+        "price": 54035.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 2.9465,
+        "price": 54772.14,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.0,
+        "price": 55710.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          2.75,
+          3.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.059,
+        "price": 56744.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.0955,
+        "price": 57384.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.125,
+        "price": 57901.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.1545,
+        "price": 58418.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.1965,
+        "price": 59154.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.25,
+        "price": 60092.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3,
+          3.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.309,
+        "price": 61126.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.3455,
+        "price": 61766.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.375,
+        "price": 62283.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.4045,
+        "price": 62800.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.4465,
+        "price": 63537.14,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.5,
+        "price": 64475.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.25,
+          3.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.559,
+        "price": 65509.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.5955,
+        "price": 66149.11,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.625,
+        "price": 66666.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.6545,
+        "price": 67183.39,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.6965,
+        "price": 67919.64,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.75,
+        "price": 68857.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.5,
+          3.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.809,
+        "price": 69891.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.8455,
+        "price": 70531.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.875,
+        "price": 71048.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.9045,
+        "price": 71565.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 3.9465,
+        "price": 72302.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.0,
+        "price": 73240.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          3.75,
+          4.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.059,
+        "price": 74274.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.0955,
+        "price": 74914.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.125,
+        "price": 75431.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.1545,
+        "price": 75948.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.1965,
+        "price": 76684.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.25,
+        "price": 77622.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4,
+          4.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.309,
+        "price": 78656.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.3455,
+        "price": 79296.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.375,
+        "price": 79813.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.4045,
+        "price": 80330.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.4465,
+        "price": 81067.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.5,
+        "price": 82005.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.25,
+          4.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.559,
+        "price": 83039.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.5955,
+        "price": 83679.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.625,
+        "price": 84196.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.6545,
+        "price": 84713.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.6965,
+        "price": 85449.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.75,
+        "price": 86387.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.5,
+          4.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.809,
+        "price": 87421.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.8455,
+        "price": 88061.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.875,
+        "price": 88578.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.9045,
+        "price": 89095.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 4.9465,
+        "price": 89832.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.0,
+        "price": 90770.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          4.75,
+          5.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.059,
+        "price": 91804.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.0955,
+        "price": 92444.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.125,
+        "price": 92961.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.1545,
+        "price": 93478.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.1965,
+        "price": 94214.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.25,
+        "price": 95152.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5,
+          5.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.309,
+        "price": 96186.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.3455,
+        "price": 96826.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.375,
+        "price": 97343.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.4045,
+        "price": 97860.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.4465,
+        "price": 98597.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.5,
+        "price": 99535.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.25,
+          5.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.559,
+        "price": 100569.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.5955,
+        "price": 101209.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.625,
+        "price": 101726.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.6545,
+        "price": 102243.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.6965,
+        "price": 102979.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.75,
+        "price": 103917.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.5,
+          5.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.809,
+        "price": 104951.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.8455,
+        "price": 105591.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.875,
+        "price": 106108.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.9045,
+        "price": 106625.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 5.9465,
+        "price": 107362.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.0,
+        "price": 108300.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          5.75,
+          6.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.059,
+        "price": 109334.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.0955,
+        "price": 109974.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.125,
+        "price": 110491.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.1545,
+        "price": 111008.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.1965,
+        "price": 111744.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.25,
+        "price": 112682.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6,
+          6.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.309,
+        "price": 113716.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.3455,
+        "price": 114356.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.375,
+        "price": 114873.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.4045,
+        "price": 115390.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.4465,
+        "price": 116127.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.5,
+        "price": 117065.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.25,
+          6.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.559,
+        "price": 118099.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.5955,
+        "price": 118739.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.625,
+        "price": 119256.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.6545,
+        "price": 119773.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.6965,
+        "price": 120509.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.75,
+        "price": 121447.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.5,
+          6.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.809,
+        "price": 122481.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.8455,
+        "price": 123121.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.875,
+        "price": 123638.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.9045,
+        "price": 124155.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 6.9465,
+        "price": 124892.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.0,
+        "price": 125830.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          6.75,
+          7.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.059,
+        "price": 126864.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.0955,
+        "price": 127504.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.125,
+        "price": 128021.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.1545,
+        "price": 128538.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.1965,
+        "price": 129274.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.25,
+        "price": 130212.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7,
+          7.25
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.309,
+        "price": 131246.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.3455,
+        "price": 131886.61,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.375,
+        "price": 132403.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.4045,
+        "price": 132920.89,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.4465,
+        "price": 133657.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.5,
+        "price": 134595.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.25,
+          7.5
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.559,
+        "price": 135629.27,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.5955,
+        "price": 136269.12,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.625,
+        "price": 136786.25,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.6545,
+        "price": 137303.38,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.6965,
+        "price": 138039.65,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.75,
+        "price": 138977.5,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.5,
+          7.75
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.809,
+        "price": 140011.77,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.8455,
+        "price": 140651.62,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.875,
+        "price": 141168.75,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.9045,
+        "price": 141685.88,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 7.9465,
+        "price": 142422.15,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      },
+      {
+        "fib": 8.0,
+        "price": 143360.0,
+        "level_type": "sub_l3",
+        "parent_range": [
+          7.75,
+          8.0
+        ],
+        "strength": 1
+      }
+    ]
+  }
+}
