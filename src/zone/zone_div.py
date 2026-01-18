@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Optional, List, Literal, Tuple
 import numpy as np
 import pandas as pd
+import talib
 
 
 @dataclass
@@ -62,32 +63,9 @@ class OversoldSegment:
 
 
 def calc_rsi(close: np.ndarray, period: int = 14) -> np.ndarray:
-    """RSI 계산 (Wilder 방식)"""
-    close = np.asarray(close, dtype=float)
-    n = len(close)
-    out = np.full(n, np.nan, dtype=float)
-
-    if n < period + 1:
-        return out
-
-    deltas = np.diff(close)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    avg_gain = gains[:period].mean()
-    avg_loss = losses[:period].mean()
-
-    rs = (avg_gain / avg_loss) if avg_loss != 0 else np.inf
-    out[period] = 100.0 - (100.0 / (1.0 + rs))
-
-    for i in range(period + 1, n):
-        g = gains[i - 1]
-        l = losses[i - 1]
-        avg_gain = (avg_gain * (period - 1) + g) / period
-        avg_loss = (avg_loss * (period - 1) + l) / period
-        out[i] = 100.0 if avg_loss == 0 else (100.0 - 100.0 / (1.0 + (avg_gain / avg_loss)))
-
-    return out
+    """RSI 계산 (talib 사용)"""
+    close = np.asarray(close, dtype=np.float64)
+    return talib.RSI(close, timeperiod=period)
 
 
 def calc_stoch_rsi(
@@ -97,32 +75,17 @@ def calc_stoch_rsi(
     k_period: int = 3,
     d_period: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """StochRSI %K, %D 계산"""
-    rsi = calc_rsi(close, period=rsi_period)
-    n = len(close)
-
-    # Stoch of RSI
-    stoch = np.full(n, np.nan)
-    for i in range(stoch_period - 1, n):
-        window = rsi[i - stoch_period + 1:i + 1]
-        if np.all(np.isfinite(window)):
-            lo, hi = np.min(window), np.max(window)
-            if hi - lo > 0:
-                stoch[i] = (rsi[i] - lo) / (hi - lo) * 100
-
-    # SMA smoothing
-    def sma(x, w):
-        out = np.full(len(x), np.nan)
-        for i in range(w - 1, len(x)):
-            window = x[i - w + 1:i + 1]
-            if np.all(np.isfinite(window)):
-                out[i] = np.mean(window)
-        return out
-
-    k = sma(stoch, k_period)
-    d = sma(k, d_period)
-
-    return k, d
+    """StochRSI %K, %D 계산 (talib 사용)"""
+    close = np.asarray(close, dtype=np.float64)
+    # talib.STOCHRSI returns fastk, fastd
+    fastk, fastd = talib.STOCHRSI(
+        close,
+        timeperiod=stoch_period,
+        fastk_period=k_period,
+        fastd_period=d_period,
+        fastd_matype=0  # SMA
+    )
+    return fastk, fastd
 
 
 def find_oversold_segments(

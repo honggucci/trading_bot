@@ -42,6 +42,14 @@ try:
 except ImportError:
     RISK_MANAGER_AVAILABLE = False
 
+# ProbabilityGate import
+try:
+    from ..regime.prob_gate import ProbabilityGate, ProbGateConfig
+    from ..regime.upstream_scores import make_score_hilbert_1h, align_score_1h_to_15m
+    PROB_GATE_AVAILABLE = True
+except ImportError:
+    PROB_GATE_AVAILABLE = False
+
 
 @dataclass
 class Trade:
@@ -118,6 +126,7 @@ class BacktestEngine:
         commission: float = 0.0004,  # 0.04% (Binance futures)
         slippage: float = 0.0001,  # 0.01%
         risk_config: Optional[Any] = None,  # RiskConfig
+        prob_gate_config: Optional[Any] = None,  # ProbGateConfig
     ):
         self.initial_equity = initial_equity
         self.risk_per_trade = risk_per_trade
@@ -139,6 +148,11 @@ class BacktestEngine:
             )
             self.risk_manager = RiskManager(equity=initial_equity, config=config)
 
+        # ProbabilityGate 초기화
+        self.prob_gate = None
+        self.prob_gate_config = prob_gate_config
+        self._prob_gate_result = None  # Pre-computed gate result for all bars
+
     def reset(self):
         """상태 초기화"""
         self.equity = self.initial_equity
@@ -153,12 +167,16 @@ class BacktestEngine:
                 config=self.risk_manager.config,
             )
 
+        # ProbabilityGate 리셋
+        self._prob_gate_result = None
+
     def run(
         self,
         df_15m: pd.DataFrame,
         signal_version: Literal['v2', 'v3'] = 'v3',
         tf_dataframes: Optional[Dict[str, pd.DataFrame]] = None,
         use_mock_hmm: bool = False,
+        df_1h: Optional[pd.DataFrame] = None,
     ) -> BacktestResult:
         """
         백테스트 실행
@@ -168,6 +186,7 @@ class BacktestEngine:
             signal_version: 'v2' or 'v3'
             tf_dataframes: Multi-TF 데이터 (v3용)
             use_mock_hmm: True면 MockHMMGate 강제 사용 (테스트용)
+            df_1h: 1H DataFrame for ProbabilityGate (optional)
 
         Returns:
             BacktestResult
@@ -183,6 +202,15 @@ class BacktestEngine:
         # ATR 계산 (없으면)
         if 'atr' not in df_15m.columns:
             df_15m = self._add_atr(df_15m.copy())
+
+        # ProbabilityGate 초기화 (df_1h 제공 시)
+        if PROB_GATE_AVAILABLE and self.prob_gate_config is not None and df_1h is not None:
+            try:
+                self._init_prob_gate(df_15m, df_1h)
+                print(f"[INFO] ProbabilityGate initialized (config: temp_mode={self.prob_gate_config.temp_mode}, p_shrink={self.prob_gate_config.p_shrink})")
+            except Exception as e:
+                print(f"[WARN] Failed to initialize ProbabilityGate: {e}")
+                self._prob_gate_result = None
 
         # HMM Gate 로드 (실제 모델 우선, 없으면 Mock fallback)
         hmm_gate = None
@@ -277,8 +305,10 @@ class BacktestEngine:
         version: str,
         tf_predictor=None,
     ) -> Optional[Dict[str, Any]]:
-        """신호 생성"""
+        """신호 생성 (ProbabilityGate AND 필터 포함)"""
         try:
+            base_signal = None
+
             if version == 'v2':
                 from ..anchor.unified_signal import check_unified_long_signal_v2
 
@@ -286,7 +316,7 @@ class BacktestEngine:
                     df, hmm_gate, current_time
                 )
 
-                return {
+                base_signal = {
                     'allowed': result.allowed,
                     'side': result.side,
                     'confidence': result.confidence,
@@ -315,7 +345,7 @@ class BacktestEngine:
                 # 최종 점수
                 final_confidence = legacy_result.confidence + mtf_boost
 
-                return {
+                base_signal = {
                     'allowed': legacy_result.allowed and final_confidence >= 0.3,
                     'side': legacy_result.side,
                     'confidence': final_confidence,
@@ -323,6 +353,17 @@ class BacktestEngine:
                     'regime': legacy_result.regime,
                     'mtf_boost': mtf_boost,
                 }
+
+            # ProbabilityGate AND 필터 적용
+            if base_signal is not None and base_signal['allowed']:
+                gate_allowed, p_bull = self._check_prob_gate(current_time, base_signal['side'])
+                base_signal['prob_gate_allowed'] = gate_allowed
+                base_signal['p_bull'] = p_bull
+                # AND 필터: base_signal.allowed AND gate_allowed
+                base_signal['allowed'] = base_signal['allowed'] and gate_allowed
+
+            return base_signal
+
         except Exception as e:
             # 신호 생성 실패 시
             return None
@@ -488,6 +529,65 @@ class BacktestEngine:
 
         df['atr'] = tr.ewm(span=period, adjust=False).mean()
         return df
+
+    def _init_prob_gate(self, df_15m: pd.DataFrame, df_1h: pd.DataFrame):
+        """ProbabilityGate 초기화 (1H Hilbert score 기반)
+
+        1H Hilbert score를 계산하고 15m에 정렬한 뒤,
+        전체 15m 구간에 대해 ProbabilityGate 결과를 미리 계산.
+        """
+        if not PROB_GATE_AVAILABLE:
+            raise ImportError("ProbabilityGate not available")
+
+        # 1. 1H Hilbert score 계산
+        score_1h = make_score_hilbert_1h(df_1h)
+
+        # 2. 15m에 정렬 (forward-fill + shift(1) for 'open' semantics)
+        score_15m = align_score_1h_to_15m(score_1h, df_15m, timestamp_semantics='open')
+
+        # 3. ProbabilityGate 계산
+        self.prob_gate = ProbabilityGate(self.prob_gate_config)
+
+        # 15m OHLC 추출
+        close_15m = df_15m['close'].values
+        high_15m = df_15m['high'].values
+        low_15m = df_15m['low'].values
+        score_raw = score_15m.values
+
+        self._prob_gate_result = self.prob_gate.compute(score_raw, close_15m, high_15m, low_15m)
+        self._prob_gate_result.index = df_15m.index
+
+    def _check_prob_gate(self, current_time, signal_side: str) -> Tuple[bool, float]:
+        """ProbabilityGate 체크
+
+        Args:
+            current_time: 현재 시간 (df_15m index)
+            signal_side: 'long' or 'short'
+
+        Returns:
+            (allowed, p_bull) tuple
+        """
+        if self._prob_gate_result is None:
+            return True, 0.5  # Gate 없으면 항상 허용
+
+        if current_time not in self._prob_gate_result.index:
+            return True, 0.5
+
+        row = self._prob_gate_result.loc[current_time]
+
+        if not row['valid']:
+            return True, 0.5  # warmup 구간은 허용
+
+        p_bull = row['p_bull']
+        action_code = row['action_code']
+
+        # Gate 로직: action_code와 signal_side 일치 여부
+        if signal_side == 'long':
+            allowed = action_code == 1  # LONG 허용
+        else:  # short
+            allowed = action_code == -1  # SHORT 허용
+
+        return allowed, p_bull
 
     def _calculate_results(self, version: str, df: pd.DataFrame) -> BacktestResult:
         """결과 계산"""

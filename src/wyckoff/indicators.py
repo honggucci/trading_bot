@@ -3,12 +3,14 @@ Technical Indicators
 ====================
 
 ATR, RSI, ADX 등 기술적 지표 계산 함수.
+talib 라이브러리 사용.
 
 Origin: WPCN wpcn/_03_common/_02_features/indicators.py
 """
 from __future__ import annotations
 import numpy as np
 import pandas as pd
+import talib
 
 
 def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
@@ -23,18 +25,19 @@ def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
 
 
 def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
-    """Average True Range 계산"""
-    tr = true_range(df["high"], df["low"], df["close"])
-    return tr.ewm(alpha=1/length, adjust=False).mean()
+    """Average True Range 계산 (talib 사용)"""
+    high = df["high"].astype(np.float64).values
+    low = df["low"].astype(np.float64).values
+    close = df["close"].astype(np.float64).values
+    result = talib.ATR(high, low, close, timeperiod=length)
+    return pd.Series(result, index=df.index)
 
 
 def rsi(close: pd.Series, length: int = 14) -> pd.Series:
-    """Relative Strength Index 계산 (Wilder's smoothing)"""
-    delta = close.diff()
-    up = delta.clip(lower=0.0)
-    down = (-delta).clip(lower=0.0)
-    rs = up.ewm(alpha=1/length, adjust=False).mean() / (down.ewm(alpha=1/length, adjust=False).mean() + 1e-12)
-    return 100.0 - (100.0 / (1.0 + rs))
+    """Relative Strength Index 계산 (talib 사용)"""
+    close_arr = close.astype(np.float64).values
+    result = talib.RSI(close_arr, timeperiod=length)
+    return pd.Series(result, index=close.index)
 
 
 def stoch_rsi(
@@ -44,14 +47,16 @@ def stoch_rsi(
     smooth_k: int = 3,
     smooth_d: int = 3
 ):
-    """Stochastic RSI 계산"""
-    r = rsi(close, rsi_len)
-    r_min = r.rolling(stoch_len, min_periods=stoch_len).min()
-    r_max = r.rolling(stoch_len, min_periods=stoch_len).max()
-    st = (r - r_min) / (r_max - r_min + 1e-12)
-    k = st.rolling(smooth_k, min_periods=smooth_k).mean()
-    d = k.rolling(smooth_d, min_periods=smooth_d).mean()
-    return k, d
+    """Stochastic RSI 계산 (talib 사용)"""
+    close_arr = close.astype(np.float64).values
+    fastk, fastd = talib.STOCHRSI(
+        close_arr,
+        timeperiod=stoch_len,
+        fastk_period=smooth_k,
+        fastd_period=smooth_d,
+        fastd_matype=0  # SMA
+    )
+    return pd.Series(fastk, index=close.index), pd.Series(fastd, index=close.index)
 
 
 def zscore(close: pd.Series, length: int = 20) -> pd.Series:
@@ -76,28 +81,23 @@ def slope(close: pd.Series, length: int = 20) -> pd.Series:
 
 
 def adx(df: pd.DataFrame, length: int = 14) -> pd.Series:
-    """Average Directional Index 계산"""
-    high, low, close = df["high"], df["low"], df["close"]
-    up_move = high.diff()
-    down_move = -low.diff()
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-
-    tr = true_range(high, low, close)
-    atr_ = tr.ewm(alpha=1/length, adjust=False).mean()
-
-    plus_di = 100.0 * pd.Series(plus_dm, index=df.index).ewm(alpha=1/length, adjust=False).mean() / (atr_ + 1e-12)
-    minus_di = 100.0 * pd.Series(minus_dm, index=df.index).ewm(alpha=1/length, adjust=False).mean() / (atr_ + 1e-12)
-    dx = 100.0 * (plus_di - minus_di).abs() / ((plus_di + minus_di) + 1e-12)
-    adx_ = dx.ewm(alpha=1/length, adjust=False).mean()
-    return adx_
+    """Average Directional Index 계산 (talib 사용)"""
+    high = df["high"].astype(np.float64).values
+    low = df["low"].astype(np.float64).values
+    close = df["close"].astype(np.float64).values
+    result = talib.ADX(high, low, close, timeperiod=length)
+    return pd.Series(result, index=df.index)
 
 
 def ema(close: pd.Series, span: int) -> pd.Series:
-    """Exponential Moving Average"""
-    return close.ewm(span=span, adjust=False).mean()
+    """Exponential Moving Average (talib 사용)"""
+    close_arr = close.astype(np.float64).values
+    result = talib.EMA(close_arr, timeperiod=span)
+    return pd.Series(result, index=close.index)
 
 
 def sma(close: pd.Series, length: int) -> pd.Series:
-    """Simple Moving Average"""
-    return close.rolling(length, min_periods=length).mean()
+    """Simple Moving Average (talib 사용)"""
+    close_arr = close.astype(np.float64).values
+    result = talib.SMA(close_arr, timeperiod=length)
+    return pd.Series(result, index=close.index)

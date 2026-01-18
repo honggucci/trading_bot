@@ -15,6 +15,8 @@ import pandas as pd
 from typing import Optional, Tuple, Dict, Literal
 from dataclasses import dataclass
 
+import talib
+
 
 @dataclass
 class DivergenceResult:
@@ -29,37 +31,9 @@ class DivergenceResult:
 
 
 def calc_rsi_wilder(close: np.ndarray, period: int = 14) -> np.ndarray:
-    """Wilder's RSI 계산"""
-    close = np.asarray(close, dtype=float)
-    n = len(close)
-    out = np.full(n, np.nan, dtype=float)
-
-    if n < period + 1:
-        return out
-
-    deltas = np.diff(close)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    avg_gain = gains[:period].mean()
-    avg_loss = losses[:period].mean()
-
-    rs = (avg_gain / avg_loss) if avg_loss != 0 else np.inf
-    out[period] = 100.0 - (100.0 / (1.0 + rs))
-
-    for i in range(period + 1, n):
-        g = gains[i-1]
-        l = losses[i-1]
-        avg_gain = (avg_gain * (period - 1) + g) / period
-        avg_loss = (avg_loss * (period - 1) + l) / period
-
-        if avg_loss == 0:
-            out[i] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            out[i] = 100.0 - (100.0 / (1.0 + rs))
-
-    return out
+    """Wilder's RSI 계산 (talib 사용)"""
+    close = np.asarray(close, dtype=np.float64)
+    return talib.RSI(close, timeperiod=period)
 
 
 def detect_bullish_divergence(

@@ -1,5 +1,5 @@
 """
-HMM Entry Gate Module (v2.6.13)
+HMM Entry Gate Module (v2.7.0)
 ===============================
 
 WPCN에서 복사 + trading_bot 독립 버전
@@ -11,11 +11,19 @@ Entry 시점에서 HMM 필터를 적용하는 모듈.
 - HMM permit/transition cooldown/soft sizing을 Entry 결정 시점에 적용
 - permit 미충족이면 트레이드 자체를 만들지 않음
 - sizing은 entry에서 결정된 size로 포지션에 고정
+
+v2.7.0 변경:
+- 1H Hilbert 레짐 필터 추가 (IC=+0.027, causal)
+- Long: BEAR 레짐에서 block
+- Short: BULL 레짐에서 block (옵션)
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Literal
 import pandas as pd
 import numpy as np
+
+# Hilbert Regime Classifier
+from src.regime.wave_regime import WaveRegimeClassifier
 
 # HMM States
 HMM_STATES = [
@@ -66,6 +74,13 @@ class HMMGateConfig:
     long_filter_enabled: bool = False
     long_filter_max_markdown_prob: float = 0.40
 
+    # Hilbert Regime Filter (1H, causal, IC=+0.027)
+    hilbert_filter_enabled: bool = True
+    hilbert_detrend_period: int = 48   # 1H bars (48시간)
+    hilbert_window: int = 32           # Hilbert 윈도우
+    hilbert_block_long_on_bear: bool = True   # Long: BEAR에서 block
+    hilbert_block_short_on_bull: bool = False  # Short: BULL에서 block (느슨)
+
 
 @dataclass
 class GateDecision:
@@ -80,6 +95,7 @@ class GateDecision:
     expected_var: float
     markdown_prob: float
     transition_delta: float = 0.0
+    hilbert_regime: str = 'RANGE'  # 1H Hilbert 레짐
 
 
 class HMMEntryGate:
@@ -98,6 +114,7 @@ class HMMEntryGate:
         features_df: pd.DataFrame,
         cfg: HMMGateConfig,
         var5_by_state: Optional[Dict[str, float]] = None,
+        prices_1h: Optional[pd.Series] = None,
     ):
         """
         Args:
@@ -105,6 +122,7 @@ class HMMEntryGate:
             features_df: 15m features (trend_strength 등)
             cfg: Gate 설정
             var5_by_state: 상태별 VaR5% (없으면 기본값 사용)
+            prices_1h: 1H 종가 시리즈 (Hilbert 필터용, optional)
         """
         self.posterior_map = posterior_map
         self.features_df = features_df
@@ -116,6 +134,15 @@ class HMMEntryGate:
         self.cooldown_until: Optional[pd.Timestamp] = None
         self.last_processed_ts: Optional[pd.Timestamp] = None
 
+        # Hilbert Regime (1H)
+        self._hilbert_regimes: Optional[pd.DataFrame] = None
+        if cfg.hilbert_filter_enabled and prices_1h is not None:
+            classifier = WaveRegimeClassifier(
+                detrend_period=cfg.hilbert_detrend_period,
+                hilbert_window=cfg.hilbert_window,
+            )
+            self._hilbert_regimes = classifier.classify_series_causal(prices_1h)
+
         # 통계
         self.stats = {
             'total_checks': 0,
@@ -123,6 +150,7 @@ class HMMEntryGate:
             'blocked_by_short_permit': 0,
             'blocked_by_long_permit': 0,
             'blocked_by_long_filter': 0,
+            'blocked_by_hilbert': 0,
             'allowed': 0,
         }
 
@@ -149,6 +177,34 @@ class HMMEntryGate:
             if not pd.isna(val):
                 return float(val)
         return 0.0
+
+    def _get_hilbert_regime(self, ts: pd.Timestamp) -> str:
+        """1H Hilbert 레짐 가져오기 (causal - 완료된 1H봉만 사용)"""
+        if self._hilbert_regimes is None:
+            return 'RANGE'
+
+        # 5m/15m → 완료된 1H봉 (lookahead 방지)
+        ts_1h_current = ts.floor('1h')
+        ts_1h = ts_1h_current - pd.Timedelta(hours=1)
+
+        # DatetimeIndex인 경우
+        if isinstance(self._hilbert_regimes.index, pd.DatetimeIndex):
+            if ts_1h in self._hilbert_regimes.index:
+                regime = self._hilbert_regimes.loc[ts_1h, 'regime']
+                return str(regime) if pd.notna(regime) else 'RANGE'
+
+            # 가장 가까운 이전 timestamp 찾기
+            mask = self._hilbert_regimes.index <= ts_1h
+            if mask.any():
+                closest = self._hilbert_regimes.index[mask][-1]
+                regime = self._hilbert_regimes.loc[closest, 'regime']
+                return str(regime) if pd.notna(regime) else 'RANGE'
+        else:
+            # 인덱스가 datetime이 아닌 경우 - 마지막 유효값 반환
+            last_regime = self._hilbert_regimes['regime'].iloc[-1]
+            return str(last_regime) if pd.notna(last_regime) else 'RANGE'
+
+        return 'RANGE'
 
     def _compute_bar_decision(self, ts_15m: pd.Timestamp) -> GateDecision:
         """특정 15m bar에 대한 gate 결정 계산"""
@@ -243,9 +299,22 @@ class HMMEntryGate:
 
         base_decision = self._decision_cache[ts_15m]
 
+        # Hilbert 레짐 가져오기 (1H, causal)
+        hilbert_regime = self._get_hilbert_regime(ts)
+
         if not base_decision.allowed:
             self.stats['blocked_by_transition'] += 1
-            return base_decision
+            return GateDecision(
+                allowed=False,
+                size_mult=0.0,
+                blocked_reason=base_decision.blocked_reason,
+                cooldown_active=base_decision.cooldown_active,
+                state=base_decision.state,
+                expected_var=base_decision.expected_var,
+                markdown_prob=base_decision.markdown_prob,
+                transition_delta=base_decision.transition_delta,
+                hilbert_regime=hilbert_regime,
+            )
 
         # Short Permit
         if side == 'short' and self.cfg.short_permit_enabled:
@@ -266,6 +335,7 @@ class HMMEntryGate:
                     expected_var=base_decision.expected_var,
                     markdown_prob=base_decision.markdown_prob,
                     transition_delta=base_decision.transition_delta,
+                    hilbert_regime=hilbert_regime,
                 )
 
         # Long Permit
@@ -283,10 +353,56 @@ class HMMEntryGate:
                     expected_var=base_decision.expected_var,
                     markdown_prob=base_decision.markdown_prob,
                     transition_delta=base_decision.transition_delta,
+                    hilbert_regime=hilbert_regime,
                 )
 
+        # Hilbert Regime Filter (1H)
+        if self.cfg.hilbert_filter_enabled:
+            # Long: BEAR 레짐에서 block
+            if side == 'long' and self.cfg.hilbert_block_long_on_bear:
+                if hilbert_regime == 'BEAR':
+                    self.stats['blocked_by_hilbert'] += 1
+                    return GateDecision(
+                        allowed=False,
+                        size_mult=0.0,
+                        blocked_reason=f'hilbert_bear (regime={hilbert_regime})',
+                        cooldown_active=False,
+                        state=base_decision.state,
+                        expected_var=base_decision.expected_var,
+                        markdown_prob=base_decision.markdown_prob,
+                        transition_delta=base_decision.transition_delta,
+                        hilbert_regime=hilbert_regime,
+                    )
+
+            # Short: BULL 레짐에서 block (옵션)
+            if side == 'short' and self.cfg.hilbert_block_short_on_bull:
+                if hilbert_regime == 'BULL':
+                    self.stats['blocked_by_hilbert'] += 1
+                    return GateDecision(
+                        allowed=False,
+                        size_mult=0.0,
+                        blocked_reason=f'hilbert_bull (regime={hilbert_regime})',
+                        cooldown_active=False,
+                        state=base_decision.state,
+                        expected_var=base_decision.expected_var,
+                        markdown_prob=base_decision.markdown_prob,
+                        transition_delta=base_decision.transition_delta,
+                        hilbert_regime=hilbert_regime,
+                    )
+
         self.stats['allowed'] += 1
-        return base_decision
+        # 최종 결과에 hilbert_regime 추가
+        return GateDecision(
+            allowed=base_decision.allowed,
+            size_mult=base_decision.size_mult,
+            blocked_reason=base_decision.blocked_reason,
+            cooldown_active=base_decision.cooldown_active,
+            state=base_decision.state,
+            expected_var=base_decision.expected_var,
+            markdown_prob=base_decision.markdown_prob,
+            transition_delta=base_decision.transition_delta,
+            hilbert_regime=hilbert_regime,
+        )
 
     def get_stats(self) -> Dict:
         """통계 반환"""

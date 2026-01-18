@@ -3,7 +3,7 @@ TradingView Identical StochRSI Implementation
 =============================================
 
 TradingView와 동일한 StochRSI 계산.
-핵심: Wilder's RSI (EMA smoothing) + Stochastic transformation
+talib 라이브러리 사용.
 
 Origin: param_search_confluence_final.py
 """
@@ -11,52 +11,7 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, Optional
 from dataclasses import dataclass
-
-try:
-    import talib
-    _HAS_TALIB = True
-except ImportError:
-    _HAS_TALIB = False
-
-
-def _rsi_wilder_numpy(close: np.ndarray, period: int = 14) -> np.ndarray:
-    """
-    Wilder's RSI (순수 NumPy 구현)
-
-    TradingView와 동일한 EMA smoothing 방식.
-    """
-    close = np.asarray(close, dtype=float)
-    n = len(close)
-    out = np.full(n, np.nan, dtype=float)
-
-    if n < period + 1:
-        return out
-
-    deltas = np.diff(close)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    # 초기 평균 (SMA)
-    avg_gain = gains[:period].mean()
-    avg_loss = losses[:period].mean()
-
-    rs = (avg_gain / avg_loss) if avg_loss != 0 else np.inf
-    out[period] = 100.0 - (100.0 / (1.0 + rs))
-
-    # Wilder's EMA smoothing
-    for i in range(period + 1, n):
-        g = gains[i-1]
-        l = losses[i-1]
-        avg_gain = (avg_gain * (period - 1) + g) / period
-        avg_loss = (avg_loss * (period - 1) + l) / period
-
-        if avg_loss == 0:
-            out[i] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            out[i] = 100.0 - (100.0 / (1.0 + rs))
-
-    return out
+import talib
 
 
 def tv_stoch_rsi(
@@ -82,12 +37,8 @@ def tv_stoch_rsi(
     """
     s = pd.Series(close, dtype='float64')
 
-    # RSI 계산
-    if _HAS_TALIB:
-        rsi_vals = talib.RSI(s.to_numpy(), timeperiod=int(rsi_len))
-    else:
-        rsi_vals = _rsi_wilder_numpy(s.to_numpy(), period=int(rsi_len))
-
+    # RSI 계산 (talib 사용)
+    rsi_vals = talib.RSI(s.to_numpy(), timeperiod=int(rsi_len))
     rsi = pd.Series(rsi_vals, index=s.index)
 
     # Stochastic transformation
@@ -255,10 +206,6 @@ class RefPoint:
     ts: pd.Timestamp
     price: float
     rsi: float
-
-
-from dataclasses import dataclass
-from typing import Tuple, Optional
 
 
 def extract_ref_from_segment(

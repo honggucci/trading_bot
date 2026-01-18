@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import numpy as np
 import pandas as pd
+import talib
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Literal, List, Dict, Tuple
@@ -39,44 +40,12 @@ class CostModel:
         return self.funding_rate * (hours / 8)
 
 # =============================================================================
-# 순수 Python RSI 계산 (역산용)
+# RSI 계산 (talib 사용)
 # =============================================================================
 def calc_rsi_wilder(close: np.ndarray, period: int = 14) -> np.ndarray:
-    """Wilder's RSI 계산"""
-    n = len(close)
-    rsi = np.full(n, np.nan)
-
-    if n < period + 1:
-        return rsi
-
-    deltas = np.diff(close)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    # 초기 평균
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-
-    if avg_loss == 0:
-        rsi[period] = 100.0
-    else:
-        rs = avg_gain / avg_loss
-        rsi[period] = 100.0 - (100.0 / (1.0 + rs))
-
-    # Wilder smoothing
-    for i in range(period + 1, n):
-        g = gains[i - 1]
-        l = losses[i - 1]
-        avg_gain = (avg_gain * (period - 1) + g) / period
-        avg_loss = (avg_loss * (period - 1) + l) / period
-
-        if avg_loss == 0:
-            rsi[i] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi[i] = 100.0 - (100.0 / (1.0 + rs))
-
-    return rsi
+    """Wilder's RSI 계산 (talib 사용)"""
+    close = np.asarray(close, dtype=np.float64)
+    return talib.RSI(close, timeperiod=period)
 
 def _rsi_at_price(close_arr: np.ndarray, new_close: float, period: int = 14) -> float:
     """특정 가격에서의 RSI 계산"""
@@ -498,51 +467,26 @@ class BacktestResult:
         }
 
 # =============================================================================
-# 인디케이터 계산 (순수 Python)
+# 인디케이터 계산 (talib 사용)
 # =============================================================================
 def calc_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
-    """ATR 계산"""
-    n = len(close)
-    atr = np.full(n, np.nan)
+    """ATR 계산 (talib 사용)"""
+    high = np.asarray(high, dtype=np.float64)
+    low = np.asarray(low, dtype=np.float64)
+    close = np.asarray(close, dtype=np.float64)
+    return talib.ATR(high, low, close, timeperiod=period)
 
-    if n < period + 1:
-        return atr
-
-    # True Range
-    tr = np.zeros(n)
-    tr[0] = high[0] - low[0]
-    for i in range(1, n):
-        tr[i] = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
-
-    # Wilder smoothing
-    atr[period] = np.mean(tr[1:period+1])
-    for i in range(period + 1, n):
-        atr[i] = (atr[i-1] * (period - 1) + tr[i]) / period
-
-    return atr
-
-def calc_stoch_rsi(rsi: np.ndarray, period: int = 14, k_period: int = 3) -> np.ndarray:
-    """StochRSI %D 계산"""
-    n = len(rsi)
-    stoch_d = np.full(n, np.nan)
-
-    for i in range(period + k_period - 1, n):
-        # StochRSI %K
-        window = rsi[i-period+1:i+1]
-        if np.all(np.isfinite(window)):
-            min_rsi = np.min(window)
-            max_rsi = np.max(window)
-            if max_rsi > min_rsi:
-                stoch_k = (rsi[i] - min_rsi) / (max_rsi - min_rsi) * 100
-            else:
-                stoch_k = 50.0
-        else:
-            continue
-
-        # %D = SMA of %K (간단히 현재값 사용)
-        stoch_d[i] = stoch_k
-
-    return stoch_d
+def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, d_period: int = 3) -> np.ndarray:
+    """StochRSI %D 계산 (talib 사용)"""
+    close = np.asarray(close, dtype=np.float64)
+    fastk, fastd = talib.STOCHRSI(
+        close,
+        timeperiod=period,
+        fastk_period=k_period,
+        fastd_period=d_period,
+        fastd_matype=0  # SMA
+    )
+    return fastd
 
 # =============================================================================
 # 데이터 로딩
@@ -577,13 +521,13 @@ def load_data(tf: str, start_date: str, end_date: str) -> pd.DataFrame:
     df = df.sort_index()
     df = df[start_date:end_date]
 
-    # RSI (Wilder)
+    # RSI (Wilder) - talib 사용
     df['rsi'] = calc_rsi_wilder(df['close'].values, period=14)
 
-    # StochRSI (26선)
-    df['stoch_d'] = calc_stoch_rsi(df['rsi'].values, period=26, k_period=3)
+    # StochRSI (26선) - talib 사용
+    df['stoch_d'] = calc_stoch_rsi(df['close'].values, period=26, k_period=3, d_period=3)
 
-    # ATR
+    # ATR - talib 사용
     df['atr'] = calc_atr(df['high'].values, df['low'].values, df['close'].values, period=14)
 
     return df
