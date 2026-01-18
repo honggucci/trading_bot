@@ -72,7 +72,32 @@ def price_to_fib(price: float, cell_low: float = FIB_0, cell_high: float = FIB_1
 
 
 def load_zone_config() -> dict:
-    """zone_width.json 로드"""
+    """Zone 파라미터 로드 (우선순위: DB → JSON)"""
+
+    # 1순위: DB에서 로드
+    try:
+        from ..db.fib_anchors import ZoneParamsDB
+        params = ZoneParamsDB.get_all()
+        if params:
+            # DB 데이터를 JSON 형식으로 변환
+            tf_params = {}
+            clamp = {}
+            for p in params:
+                tf_params[p.timeframe] = {
+                    'atr_window': p.atr_window,
+                    'k': p.k,
+                    'role': p.role,
+                }
+                if p.min_pct is not None and p.max_pct is not None:
+                    clamp[p.timeframe] = {
+                        'min_pct': p.min_pct,
+                        'max_pct': p.max_pct,
+                    }
+            return {'tf_params': tf_params, 'clamp': clamp}
+    except Exception:
+        pass  # DB 실패 시 JSON fallback
+
+    # 2순위: JSON 파일
     config_path = Path(__file__).parent.parent.parent / "config" / "zone_width.json"
     with open(config_path, encoding='utf-8') as f:
         return json.load(f)

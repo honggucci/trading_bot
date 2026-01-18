@@ -116,16 +116,25 @@ trading_bot/
 │   ├── SPEC_v2_integration.md
 │   └── session_backups/
 ├── src/
-│   ├── context/          # Layer 1
-│   ├── zone/             # Layer 2
-│   ├── gate/             # Layer 3
-│   ├── trigger/          # Layer 4
-│   ├── execution/        # Layer 5
-│   └── utils/
+│   ├── anchor/           # 15m Divergence + StochRSI + Exit
+│   ├── backtest/         # Backtest engine
+│   ├── context/          # Layer 1 (Context TFs)
+│   ├── db/               # Database utilities
+│   ├── regime/           # ProbabilityGate + HMM
+│   ├── risk/             # RiskManager
+│   ├── trigger/          # Layer 4 (5m Trigger)
+│   ├── utils/            # Timeframe utilities
+│   └── zone/             # Layer 2 (Zone Builder)
+├── scripts/
+│   ├── backtest_strategy_compare.py
+│   ├── setup_fib_db.py
+│   ├── train_hmm_and_save.py
+│   └── update_*_data.py
 ├── tests/
 ├── config/
 ├── data/
-└── legacy/
+├── models/
+└── legacy/               # Unused/broken modules archived
 ```
 
 ---
@@ -152,18 +161,17 @@ trading_bot/
 
 ---
 
-## 테스트 현황 (v3.2)
+## 테스트 현황 (v4.0)
 
 ```
 tests/
+├── test_backtest_engine.py    -  9 tests
 ├── test_exit_logic.py         - 15 tests
-├── test_multi_tf_fib.py       - 11 tests
-├── test_real_btc_data.py      -  4 tests
+├── test_prob_gate.py          - 28 tests
 ├── test_risk_manager.py       - 32 tests (+6 Pessimist scenarios)
-├── test_unified_signal_v3.py  - 15 tests
-└── test_backtest_engine.py    -  9 tests (+2 signal generation)
+└── test_timeframe.py          - 80 tests (Duration, TF Hierarchy)
 ─────────────────────────────────────────────
-Total                          - 86 tests
+Total                          - 164 tests
 ```
 
 실행: `python -m pytest tests/ -v`
@@ -183,6 +191,27 @@ models/
 
 ---
 
+## Key Modules
+
+### src/utils/timeframe.py (NEW)
+Timeframe-Agnostic Configuration System:
+- `duration_to_bars("1d", "15m")` → 96 bars
+- `get_lower_timeframe("15m")` → "5m" (TF fallback)
+- `get_fallback_chain("1h", "5m")` → ["1h", "15m", "5m"]
+- `TF_HIERARCHY`: ['1w', '1d', '4h', '1h', '15m', '5m', '1m']
+
+### src/regime/prob_gate.py
+ProbGateConfig now supports duration-based config:
+```python
+ProbGateConfig(
+    timeframe='5m',
+    atr_duration='1d',   # → n_atr=288
+    vol_duration='2d',   # → vol_window=576
+)
+```
+
+---
+
 ## Version
 
 - v2.0 (2026-01-13): Integration Spec 완성
@@ -190,3 +219,4 @@ models/
 - v3.0 (2026-01-14): Legacy + HMM + TFPredictor 통합
 - v3.1 (2026-01-14): RiskManager 통합, 77 tests 완료
 - v3.2 (2026-01-14): 9-Persona Critical Review 완료, 86 tests
+- v4.0 (2026-01-18): 코드 리팩토링 + Timeframe Agnostic Config, 164 tests

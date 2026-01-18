@@ -43,10 +43,49 @@ import numpy as np
 
 
 # ============================================================================
+# Database Integration (Optional)
+# ============================================================================
+
+# DB 모듈 로드 시도 (실패 시 하드코딩 fallback)
+_DB_AVAILABLE = False
+_FibAnchorDB = None
+_FibAnchorClass = None
+_FibLevelsDB = None
+_FibLevelClass = None
+
+try:
+    from ..db.fib_anchors import FibAnchorDB as _FibAnchorDB
+    from ..db.fib_anchors import FibAnchor as _FibAnchorClass
+    from ..db.fib_anchors import FibLevelsDB as _FibLevelsDB
+    from ..db.fib_anchors import FibLevel as _FibLevelClass
+    _DB_AVAILABLE = True
+except ImportError:
+    pass
+
+
+def _get_anchor_from_db(symbol: str = "BTC") -> Optional[Dict[str, Any]]:
+    """DB에서 Fib 앵커 조회 (fallback: None)"""
+    if not _DB_AVAILABLE or _FibAnchorDB is None:
+        return None
+
+    try:
+        anchor = _FibAnchorDB.get(symbol)
+        if anchor:
+            return {
+                "fib_0": anchor.fib_0,
+                "fib_1": anchor.fib_1,
+                "range": anchor.fib_range,
+            }
+    except Exception:
+        pass
+    return None
+
+
+# ============================================================================
 # 1W Fib Anchor (절대 불변 기준점)
 # ============================================================================
 
-# 1W Fib 앵커 기본값 (JSON 로드 실패 시 사용)
+# 1W Fib 앵커 기본값 (JSON/DB 로드 실패 시 사용)
 _DEFAULT_1W_ANCHOR = {
     "fib_0": 3120,
     "fib_1": 20650,
@@ -57,12 +96,13 @@ _DEFAULT_1W_ANCHOR = {
 _1W_ANCHOR_CACHE: Optional[Dict[str, Any]] = None
 
 
-def load_1w_fib_anchor(force_reload: bool = False) -> Dict[str, Any]:
+def load_1w_fib_anchor(force_reload: bool = False, symbol: str = "BTC") -> Dict[str, Any]:
     """
-    1W Fib 앵커 JSON 로드
+    1W Fib 앵커 로드 (우선순위: DB → JSON → 기본값)
 
     Args:
         force_reload: 캐시 무시하고 다시 로드
+        symbol: 에셋 심볼 (BTC, ETH, XRP 등)
 
     Returns:
         {
@@ -73,23 +113,37 @@ def load_1w_fib_anchor(force_reload: bool = False) -> Dict[str, Any]:
     """
     global _1W_ANCHOR_CACHE
 
-    if _1W_ANCHOR_CACHE is not None and not force_reload:
+    # BTC 캐시만 사용 (다른 심볼은 매번 조회)
+    if symbol == "BTC" and _1W_ANCHOR_CACHE is not None and not force_reload:
         return _1W_ANCHOR_CACHE
 
-    # JSON 파일 경로
-    config_path = Path(__file__).parent.parent.parent / "config" / "fib_1w_anchor.json"
+    # 1순위: DB에서 로드 (멀티 에셋 지원)
+    db_anchor = _get_anchor_from_db(symbol)
+    if db_anchor is not None:
+        result = {"anchor": db_anchor, "levels": {}, "key_levels": []}
+        if symbol == "BTC":
+            _1W_ANCHOR_CACHE = result
+        return result
 
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            _1W_ANCHOR_CACHE = data
-            return data
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        # 기본값 반환
+    # 2순위: JSON 파일 로드 (BTC만)
+    if symbol == "BTC":
+        config_path = Path(__file__).parent.parent.parent / "config" / "fib_1w_anchor.json"
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                _1W_ANCHOR_CACHE = data
+                return data
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    # 3순위: 기본값 (BTC만, 다른 심볼은 에러)
+    if symbol == "BTC":
         return {"anchor": _DEFAULT_1W_ANCHOR, "levels": {}, "key_levels": []}
 
+    raise ValueError(f"No Fib anchor found for {symbol}. Add to DB first: python scripts/setup_fib_db.py")
 
-def get_1w_fib_level(price: float) -> float:
+
+def get_1w_fib_level(price: float, symbol: str = "BTC") -> float:
     """
     현재가의 1W Fib 레벨 계산 (절대 기준)
 
@@ -97,6 +151,7 @@ def get_1w_fib_level(price: float) -> float:
 
     Args:
         price: 현재가 (USD)
+        symbol: 에셋 심볼 (BTC, ETH, XRP)
 
     Returns:
         Fib 레벨 (예: 5.24)
@@ -104,15 +159,17 @@ def get_1w_fib_level(price: float) -> float:
     Example:
         >>> get_1w_fib_level(95000)
         5.24
+        >>> get_1w_fib_level(3500, symbol="ETH")
+        2.56
     """
-    data = load_1w_fib_anchor()
+    data = load_1w_fib_anchor(symbol=symbol)
     anchor = data.get("anchor", _DEFAULT_1W_ANCHOR)
     fib_0 = anchor["fib_0"]
     fib_range = anchor["range"]
     return (price - fib_0) / fib_range
 
 
-def get_1w_fib_price(fib_level: float) -> float:
+def get_1w_fib_price(fib_level: float, symbol: str = "BTC") -> float:
     """
     1W Fib 레벨에 해당하는 가격 계산
 
@@ -120,6 +177,7 @@ def get_1w_fib_price(fib_level: float) -> float:
 
     Args:
         fib_level: Fib 레벨 (예: 3.618)
+        symbol: 에셋 심볼 (BTC, ETH, XRP)
 
     Returns:
         가격 (USD)
@@ -127,8 +185,10 @@ def get_1w_fib_price(fib_level: float) -> float:
     Example:
         >>> get_1w_fib_price(3.618)
         66549
+        >>> get_1w_fib_price(3.618, symbol="ETH")
+        4909
     """
-    data = load_1w_fib_anchor()
+    data = load_1w_fib_anchor(symbol=symbol)
     anchor = data.get("anchor", _DEFAULT_1W_ANCHOR)
     fib_0 = anchor["fib_0"]
     fib_range = anchor["range"]
@@ -721,6 +781,8 @@ def get_nearby_fib_levels(
     price: float,
     count: int = 5,
     max_depth: int = 1,
+    symbol: str = "BTC",
+    use_db: bool = True,
 ) -> Dict[str, List[FibLevel]]:
     """
     현재가 근처의 Fib 레벨 반환
@@ -728,12 +790,37 @@ def get_nearby_fib_levels(
     Args:
         price: 현재가
         count: 위/아래 각각 몇 개씩
-        max_depth: 프랙탈 깊이
+        max_depth: 프랙탈 깊이 (0=L0, 1=L0+L1)
+        symbol: 에셋 심볼 (DB 사용 시)
+        use_db: True면 DB 우선 조회
 
     Returns:
         {"above": [...], "below": [...]}
     """
-    # 현재가 ±30% 범위에서 레벨 생성
+    # 1순위: DB에서 조회 (미리 계산된 레벨)
+    if use_db and _DB_AVAILABLE and _FibLevelsDB is not None:
+        try:
+            # max_depth=0 → L0만, max_depth>=1 → 전체 (L0+L1)
+            depth_filter = 0 if max_depth == 0 else None
+            db_result = _FibLevelsDB.get_nearby(price, count=count, symbol=symbol, depth=depth_filter)
+
+            # DB FibLevel → 로컬 FibLevel 변환
+            def convert(db_lvl):
+                return FibLevel(
+                    fib_ratio=db_lvl.fib_ratio,
+                    price=db_lvl.price,
+                    depth=db_lvl.depth,
+                    cell=(db_lvl.cell_low, db_lvl.cell_high),
+                )
+
+            return {
+                "above": [convert(lvl) for lvl in db_result["above"]],
+                "below": [convert(lvl) for lvl in db_result["below"]],
+            }
+        except Exception:
+            pass  # DB 실패 시 계산 fallback
+
+    # 2순위: 실시간 계산 (fallback)
     margin = price * 0.3
     levels = get_fractal_fib_levels(
         price_range=(price - margin, price + margin),
