@@ -255,7 +255,8 @@ class Config:
     # "fib": 기존 Fib 레벨 기반 TP (RR 보장 안됨)
     # "atr": ATR 배수 기반 TP (RR 안정화)
     # "fib_rr": Fib 레벨 중 RR >= min_rr_net 만족하는 가장 가까운 TP 선택 (없으면 진입 거부)
-    tp_mode: str = "fib"                   # "fib" | "atr" | "fib_rr"
+    # "trailing_only": TP 없이 Trailing Stop만으로 청산 (PR-MODE48)
+    tp_mode: str = "fib"                   # "fib" | "atr" | "fib_rr" | "trailing_only"
     tp_atr_mults: tuple = (1.0, 1.5, 2.0)  # mode="atr"일 때 TP1/TP2/TP3 배수
 
     # === PR-B: tp_mode="fib_rr" 설정 ===
@@ -331,8 +332,9 @@ class Config:
     fib_space: str = "linear"             # "linear" | "log" (log가 BTC에 적합)
     fib_anchor_low: float = 3120.0        # Fib 앵커 저점 (2019 12월 저점)
     fib_anchor_high: float = 143360.0     # Fib 앵커 고점 (69K * 2.0782)
-    fib_tolerance_mode: str = "pct"       # "pct" | "atr_pct" | "gap_frac"
+    fib_tolerance_mode: str = "pct"       # "pct" | "atr_pct" | "fib_zone" | "fib_gap"
     fib_tolerance_atr_mult: float = 1.0   # atr_pct 모드: tolerance = ATR * mult / price
+    fib_tolerance_coverage_ratio: float = 0.2  # fib_zone 모드: 인접 gap의 N% (0.2=틈 있음, 0.5=경계 맞닿음)
     atr_tf_for_fib: str = "15m"           # Fib tolerance 계산용 ATR 타임프레임
 
     # === PR-ENTRY-RR2: RR Limit Entry (수동매매 방식) ===
@@ -345,11 +347,13 @@ class Config:
     rr_limit_max_atr_dist: float = 2.0        # entry_limit이 현재가에서 N ATR 이상 멀면 skip
     rr_limit_price_ref: str = "close"         # entry 기준점: "close" | "zone_low" (추후)
     rr_limit_fill_on: str = "low"             # 체결 조건: "low" (bar low <= limit) | "close"
+    entry_offset_ratio: float = 0.3           # PR-MODE48: Entry offset (TP 거리의 N% 아래에서 limit)
 
     # === PR-DYN-FIB v2: 1W Dynamic Fib (ZigZag + Log) ===
     # Layer 1 (Macro): 1W Log Fib (정적 $3K~$143K)
     # Layer 2 (Dynamic): 1W ZigZag Log Fib (동적, Macro 갭 채움)
     # NOTE: 15m dynamic fib는 range가 너무 좁아 효과 없음 → 1W만 사용
+    use_macro_fib: bool = True                # Macro Fib (정적 앵커) 사용
     use_dynamic_fib: bool = False             # 동적 Fib 사용
     dynamic_fib_tf: str = "1w"                # 1W 고정 (15m은 효과 없음)
     dynamic_fib_space: str = "log"            # Log 스페이스 (1W range에서 효과 있음)
@@ -828,6 +832,51 @@ def calc_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int =
     low = np.asarray(low, dtype=np.float64)
     close = np.asarray(close, dtype=np.float64)
     return talib.ATR(high, low, close, timeperiod=period)
+
+
+# =============================================================================
+# PR-MODE48: Trade Parameter Invariant Validation
+# =============================================================================
+def validate_trade_params(
+    side: str,
+    entry: float,
+    sl: float,
+    tp1: float,
+    tp2: float = None,
+    tp3: float = None
+) -> Tuple[bool, str]:
+    """
+    트레이드 불변식 체크.
+
+    LONG: SL < Entry < TP1 < TP2 < TP3
+    SHORT: SL > Entry > TP1 > TP2 > TP3
+
+    Returns:
+        (valid, reason): 유효 여부와 실패 사유
+    """
+    if side == 'long':
+        if sl >= entry:
+            return False, f"SL({sl:,.0f}) >= Entry({entry:,.0f})"
+        if tp1 <= entry:
+            return False, f"TP1({tp1:,.0f}) <= Entry({entry:,.0f})"
+        if tp2 is not None and tp2 != float('inf') and tp2 <= tp1:
+            return False, f"TP2({tp2:,.0f}) <= TP1({tp1:,.0f})"
+        if tp3 is not None and tp3 != float('inf') and tp2 is not None and tp3 <= tp2:
+            return False, f"TP3({tp3:,.0f}) <= TP2({tp2:,.0f})"
+        sl_dist = entry - sl
+        if sl_dist <= 0:
+            return False, f"SL distance <= 0 ({sl_dist:,.0f})"
+    elif side == 'short':
+        if sl <= entry:
+            return False, f"SL({sl:,.0f}) <= Entry({entry:,.0f})"
+        if tp1 >= entry:
+            return False, f"TP1({tp1:,.0f}) >= Entry({entry:,.0f})"
+        sl_dist = sl - entry
+        if sl_dist <= 0:
+            return False, f"SL distance <= 0 ({sl_dist:,.0f})"
+
+    return True, "OK"
+
 
 # =============================================================================
 # PR4-R6: Liquidation Price 계산
@@ -2182,8 +2231,10 @@ def find_oversold_reference_hybrid(
     if not segments:
         return None
 
-    # 현재 과매도일 때만 전 세그먼트 사용
-    current_oversold = np.isfinite(d[-1]) and d[-1] <= threshold
+    # 직전봉이 과매도일 때만 전 세그먼트 사용 (lookahead 방지: 현재봉은 미확정)
+    if len(d) < 2:
+        return None
+    current_oversold = np.isfinite(d[-2]) and d[-2] <= threshold
     if not current_oversold:
         return None
 
@@ -2253,8 +2304,10 @@ def find_overbought_reference_hybrid(
     if not segments:
         return None
 
-    # 현재 과매수일 때만 전 세그먼트 사용
-    current_overbought = np.isfinite(d[-1]) and d[-1] >= threshold
+    # 직전봉이 과매수일 때만 전 세그먼트 사용 (lookahead 방지: 현재봉은 미확정)
+    if len(d) < 2:
+        return None
+    current_overbought = np.isfinite(d[-2]) and d[-2] >= threshold
     if not current_overbought:
         return None
 
@@ -2508,21 +2561,22 @@ def is_near_dynamic_fib_level(
     if dynfib_state is None or not dynfib_state.is_valid():
         return False, None
 
-    # Dynamic Fib 레벨 계산
+    # Dynamic Fib 레벨 계산 (0.0과 1.0 포함)
+    extended_ratios = (0.0,) + tuple(ratios) + (1.0,)
     dyn_levels = get_dynamic_fib_levels(
         dynfib_state.low,
         dynfib_state.high,
-        ratios,
+        extended_ratios,
         space=config.dynamic_fib_space
     )
 
     if not dyn_levels:
         return False, None
 
-    # 가장 가까운 레벨 찾기
+    # 가장 가까운 레벨 찾기 (0.0=low, 1.0=high 포함)
     closest_price = min(dyn_levels, key=lambda lvl: abs(lvl - price))
     closest_idx = dyn_levels.index(closest_price)
-    closest_ratio = ratios[closest_idx] if closest_idx < len(ratios) else 0.5
+    closest_ratio = extended_ratios[closest_idx] if closest_idx < len(extended_ratios) else 0.5
 
     # Tolerance 계산 (config 기반)
     if config.fib_tolerance_mode == "fib_gap":
@@ -2548,6 +2602,44 @@ def is_near_dynamic_fib_level(
             effective_tolerance = (atr * config.fib_tolerance_atr_mult) / price
         else:
             effective_tolerance = config.fib_tolerance_pct
+    elif config.fib_tolerance_mode == "fib_zone":
+        # fib_zone 모드: 인접 레벨까지 gap의 coverage_ratio% 만큼만 허용
+        # coverage_ratio=0.2 → 각 방향으로 gap의 20%만 커버 → 틈 60%
+        # coverage_ratio=0.5 → 각 방향으로 gap의 50%만 커버 → 틈 0% (경계 맞닿음)
+        # extended_ratios는 이미 위에서 (0.0, ..., 1.0)으로 정의됨
+        idx = closest_idx  # 이미 extended_ratios 기준으로 찾은 인덱스
+
+        # 인접 gap 계산 (ratio 단위)
+        # 0.0 (idx=0): 하단 gap 없음 → upper_gap만 사용
+        # 1.0 (idx=last): 상단 gap 없음 → lower_gap만 사용
+        lower_gap_ratio = extended_ratios[idx] - extended_ratios[idx - 1] if idx > 0 else extended_ratios[1] - extended_ratios[0]
+        upper_gap_ratio = extended_ratios[idx + 1] - extended_ratios[idx] if idx < len(extended_ratios) - 1 else extended_ratios[-1] - extended_ratios[-2]
+
+        # Zone 경계 (ratio 단위)
+        coverage = config.fib_tolerance_coverage_ratio
+        lower_boundary_ratio = closest_ratio - lower_gap_ratio * coverage
+        upper_boundary_ratio = closest_ratio + upper_gap_ratio * coverage
+
+        # ratio를 price로 변환해서 zone 경계 계산
+        fib_low = dynfib_state.low
+        fib_high = dynfib_state.high
+        fib_range = fib_high - fib_low
+
+        if config.dynamic_fib_space == "log" and fib_low > 0 and fib_high > fib_low:
+            # Log space: price = low * (high/low)^ratio
+            lower_boundary_price = fib_low * ((fib_high / fib_low) ** lower_boundary_ratio)
+            upper_boundary_price = fib_low * ((fib_high / fib_low) ** upper_boundary_ratio)
+        else:
+            # Linear space: price = low + range * ratio
+            lower_boundary_price = fib_low + fib_range * lower_boundary_ratio
+            upper_boundary_price = fib_low + fib_range * upper_boundary_ratio
+
+        # price가 zone 내에 있는지 직접 체크
+        if lower_boundary_price <= price <= upper_boundary_price:
+            fib_level = FibLevel(price=closest_price, fib_ratio=closest_ratio, depth=0, cell=(0, 0))
+            return True, fib_level
+        else:
+            return False, None
     else:
         effective_tolerance = config.fib_tolerance_pct
 
@@ -2579,8 +2671,11 @@ def is_near_fib_level_combined(
     Returns:
         (is_near: bool, fib_level: Optional[FibLevel], source: "macro"|"dynfib"|"none")
     """
-    # 1. Macro Fib 체크 (항상)
-    is_near_macro, fib_level_macro = is_near_l1_level(price, atr=atr, config=config)
+    # 1. Macro Fib 체크 (use_macro_fib=True일 때만)
+    is_near_macro = False
+    fib_level_macro = None
+    if config.use_macro_fib:
+        is_near_macro, fib_level_macro = is_near_l1_level(price, atr=atr, config=config)
 
     # 2. Dynamic Fib 체크 (dynfib_use_as가 "both" 또는 "entry_filter"일 때)
     is_near_dyn = False
@@ -3201,19 +3296,22 @@ class StrategyA:
             # 15m 바 전환 감지
             current_15m_bar_time = df_15m_slice.index[-1]
             if current_15m_bar_time != last_15m_bar_time:
-                # 새 15m 바 진입 - 상태 전환 체크
-                current_stoch = df_15m_slice['stoch_d'].iloc[-1] if len(df_15m_slice) > 0 else 50.0
-                if not np.isfinite(current_stoch):
-                    current_stoch = 50.0
+                # 새 15m 바 진입 - 직전 확정봉의 StochRSI로 시그널 판단
+                # iloc[-2] = 방금 확정된 15분봉 (예: 14:00 시점에서 13:45~14:00 봉)
+                if len(df_15m_slice) >= 2:
+                    prev_confirmed_stoch = df_15m_slice['stoch_d'].iloc[-2]
+                    if not np.isfinite(prev_confirmed_stoch):
+                        prev_confirmed_stoch = 50.0
+                else:
+                    prev_confirmed_stoch = 50.0
 
-                # 과매도 진입 순간: 이전 > threshold → 현재 ≤ threshold
+                # 과매도 상태: 직전 확정봉의 StochRSI가 threshold 이하
                 oversold_thr = self.config.stoch_rsi_oversold
                 overbought_thr = self.config.stoch_rsi_overbought
-                long_signal_triggered = (prev_15m_stoch > oversold_thr and current_stoch <= oversold_thr)
-                # 과매수 진입 순간: 이전 < threshold → 현재 ≥ threshold
-                short_signal_triggered = (prev_15m_stoch < overbought_thr and current_stoch >= overbought_thr)
+                long_signal_triggered = (prev_confirmed_stoch <= oversold_thr)
+                # 과매수 상태: 직전 확정봉의 StochRSI가 threshold 이상
+                short_signal_triggered = (prev_confirmed_stoch >= overbought_thr)
 
-                prev_15m_stoch = current_stoch
                 last_15m_bar_time = current_15m_bar_time
             else:
                 # 동일 15m 바 내 후속 5m 바 - 신호 비활성화 (한 번만 체크)
@@ -3754,7 +3852,7 @@ class StrategyA:
                                 pending_long_signal = None
                                 continue
 
-                            entry_limit = signal_price - (tp_distance * 0.3)
+                            entry_limit = signal_price - (tp_distance * self.config.entry_offset_ratio)
 
                             # SL도 entry 기준으로 재계산
                             temp_sl = entry_limit - (signal_atr * sl_mult)
@@ -4098,6 +4196,11 @@ class StrategyA:
                         tp2 = valid_tps[1][0] if len(valid_tps) > 1 else entry_price + (atr * 3.5)
                         tp3 = valid_tps[2][0] if len(valid_tps) > 2 else entry_price + (atr * 5.0)
                         rr_net = selected_rr  # fib_rr 모드에서는 이미 RR 계산됨
+                    elif self.config.tp_mode == "trailing_only":
+                        # PR-MODE48: TP 없이 Trailing Stop만으로 청산 (LONG)
+                        # TP를 무한대로 설정하여 절대 도달하지 않게 함
+                        tp1 = tp2 = tp3 = float('inf')
+                        print(f"  [TRAILING_ONLY LONG] {current_time} - TP disabled, trailing stop only")
                     else:
                         # Fib TP: TP1 (두번째 L1), TP2 (세번째 L1), TP3 (네번째 L1) - 확장된 타겟
                         fib1 = get_next_l1_above(entry_price, self.config)
@@ -4177,6 +4280,22 @@ class StrategyA:
                             print(f"  [LONG REJECTED] {current_time} - RR_GATE: RR_net={rr_net:.2f} < min={self.config.min_rr_net}")
                             pending_long_signal = None
                             continue
+
+                    # sl_mult 초기화 (non-limit-order path)
+                    if self.cycle_dynamics and len(df_15m_slice) >= self.config.cycle_lookback:
+                        sl_mult = cycle_result['dynamic_sl_mult'] if cycle_result and 'dynamic_sl_mult' in cycle_result else self.config.sl_atr_mult
+                    else:
+                        sl_mult = self.config.sl_atr_mult
+
+                    # PR-MODE48: Invariant 체크 (SL < Entry < TP)
+                    valid, reason = validate_trade_params('long', entry_price, sl, tp1, tp2, tp3)
+                    if not valid:
+                        print(f"  [INVARIANT REJECT] {current_time} - {reason}")
+                        if 'invariant_rejects' not in self.__dict__:
+                            self.invariant_rejects = 0
+                        self.invariant_rejects += 1
+                        pending_long_signal = None
+                        continue
 
                     # 모든 트레이드 로그 (디버그용)
                     print(f"  [LONG ENTRY] {current_time}")
@@ -4406,6 +4525,11 @@ class StrategyA:
                         tp2 = valid_tps[1][0] if len(valid_tps) > 1 else entry_price - (atr * 3.5)
                         tp3 = valid_tps[2][0] if len(valid_tps) > 2 else entry_price - (atr * 5.0)
                         rr_net = selected_rr  # fib_rr 모드에서는 이미 RR 계산됨
+                    elif self.config.tp_mode == "trailing_only":
+                        # PR-MODE48: TP 없이 Trailing Stop만으로 청산 (SHORT)
+                        # SHORT에서 TP는 0보다 작아야 하므로 -inf로 설정
+                        tp1 = tp2 = tp3 = 0.0  # SHORT TP는 entry 아래이므로 0으로 설정 (도달 불가)
+                        print(f"  [TRAILING_ONLY SHORT] {current_time} - TP disabled, trailing stop only")
                     else:
                         # Fib TP: TP1 (두번째 L1 아래), TP2 (세번째 L1 아래) - 확장된 타겟
                         fib1 = get_next_l1_below(entry_price, self.config)
@@ -5118,6 +5242,13 @@ class StrategyB:
 
                     # ATR 기반 SL
                     sl = entry_price - (atr * self.config.sl_atr_mult)
+
+                    # PR-MODE48: Invariant 체크 (SL < Entry < TP)
+                    valid, reason = validate_trade_params('long', entry_price, sl, tp)
+                    if not valid:
+                        print(f"  [INVARIANT REJECT B] {current_time} - {reason}")
+                        pending_long_signal = None
+                        continue
 
                     # PR6: 리스크 고정 사이징 + PR6.3 로깅
                     qty_info = self.config.calculate_qty_info(entry_price, sl, atr)
