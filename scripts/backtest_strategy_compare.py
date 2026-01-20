@@ -5761,6 +5761,8 @@ def main():
     # Context TF 데이터 로드 (추세 필터 + Hilbert + ProbabilityGate용)
     df_context = None  # 1H (context)
     df_context_high = None  # 4H (higher context)
+    df_1h = None  # Legacy alias
+    df_4h = None  # Legacy alias
     prob_gate_result = None  # ProbabilityGate 결과 (trigger_tf 인덱스)
 
     need_context_data = (config.use_trend_filter_1h or config.use_trend_filter_4h or
