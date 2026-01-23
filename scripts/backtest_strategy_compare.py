@@ -251,13 +251,29 @@ class Config:
     stoch_rsi_oversold: float = 20.0       # 과매도 진입 임계값
     stoch_rsi_overbought: float = 80.0     # 과매수 진입 임계값
 
+    # === EXP-ENTRY-1: StochRSI 전환 조건 ===
+    # "state": 기존 - StochRSI <= 20이면 바로 시그널 (과매도 상태)
+    # "transition": 개선 - StochRSI가 20 아래에서 20 위로 복귀할 때만 (과매도 탈출)
+    stoch_signal_mode: str = "state"       # "state" | "transition" | "not_oversold"
+
     # === PR4-R0: TP 모드 옵션 ===
     # "fib": 기존 Fib 레벨 기반 TP (RR 보장 안됨)
     # "atr": ATR 배수 기반 TP (RR 안정화)
     # "fib_rr": Fib 레벨 중 RR >= min_rr_net 만족하는 가장 가까운 TP 선택 (없으면 진입 거부)
     # "trailing_only": TP 없이 Trailing Stop만으로 청산 (PR-MODE48)
-    tp_mode: str = "fib"                   # "fib" | "atr" | "fib_rr" | "trailing_only"
+    # "r_based": R 기반 부분익절 (TP1=1R/50%, TP2=2R/25%, Runner=trailing)
+    tp_mode: str = "fib"                   # "fib" | "atr" | "fib_rr" | "trailing_only" | "r_based"
     tp_atr_mults: tuple = (1.0, 1.5, 2.0)  # mode="atr"일 때 TP1/TP2/TP3 배수
+
+    # === EXP-EXIT-1: R 기반 부분익절 구조 ===
+    # R = (Entry - SL), TP는 R의 배수로 계산
+    # TP1 도달시 SL → BE(진입가)로 이동하여 손실 폭탄 제거
+    r_tp1_mult: float = 1.0                # TP1 = Entry + 1R (1배)
+    r_tp1_pct: float = 0.5                 # TP1에서 50% 청산
+    r_tp2_mult: float = 2.0                # TP2 = Entry + 2R (2배)
+    r_tp2_pct: float = 0.25                # TP2에서 25% 청산
+    r_runner_pct: float = 0.25             # Runner = 나머지 25% (trailing)
+    use_be_stop_on_tp1: bool = True        # TP1 도달시 SL을 BE로 이동
 
     # === PR-B: tp_mode="fib_rr" 설정 ===
     # Fib 후보 중 RR_net >= min_rr_net 만족하는 가장 가까운 TP 선택
@@ -348,6 +364,7 @@ class Config:
     rr_limit_price_ref: str = "close"         # entry 기준점: "close" | "zone_low" (추후)
     rr_limit_fill_on: str = "low"             # 체결 조건: "low" (bar low <= limit) | "close"
     entry_offset_ratio: float = 0.3           # PR-MODE48: Entry offset (TP 거리의 N% 아래에서 limit)
+    rr_entry_mode: str = "fixed_rr"            # PR-MODE61: "fixed_rr" (Fib SL/TP 기반 RR 2:1 강제) | "offset_ratio" (기존)
 
     # === PR-DYN-FIB v2: 1W Dynamic Fib (ZigZag + Log) ===
     # Layer 1 (Macro): 1W Log Fib (정적 $3K~$143K)
@@ -365,6 +382,18 @@ class Config:
     dynfib_use_as: str = "tp_candidate"       # "tp_candidate" | "entry_filter" | "both"
     dynfib_confluence_with_macro: bool = False  # Macro Fib와 confluence 요구 (미사용)
     dynfib_confluence_tol: float = 0.005      # confluence 허용 오차 (미사용)
+    dynfib_max_depth: int = 0                 # Dynamic Fib 깊이: 0=L0만, 1=L0+L1 (L1은 L0 구간 내 sub-fib)
+    use_fib_entry_filter: bool = True         # Fib 진입 필터 사용 (False=다이버전스만으로 진입)
+
+    # === PR-MODE63: 저변동성 필터 ===
+    # Dynamic Fib 0~0.236 구간이 가격의 X% 미만이면 매매 금지
+    # 저변동성 구간에서 SL이 너무 타이트해지는 문제 방지
+    use_min_fib_gap_filter: bool = False      # 저변동성 필터 사용
+    min_fib_gap_pct: float = 0.5              # 최소 Fib 간격 (0~0.236 구간이 가격의 X%)
+
+    # === PR-SHADOW: Shadow Trade 추적 ===
+    # ProbGate 등으로 reject된 시그널을 가상 거래로 추적하여 효과 분석
+    track_shadow_trades: bool = False         # Shadow trade 추적 활성화
 
     # 쿨다운 설정 (손절 후 재진입 제한)
     # Legacy bar count (duration 우선)
@@ -375,10 +404,20 @@ class Config:
     atr_period: int = 14              # ATR 계산 기간 (bc3e19a: 14, atr_duration 미설정 시 사용)
 
     # === PR-FIB-SL: Fib 구조 기반 SL ===
-    # SL = prev_fib - buffer, buffer = min(ATR, fib_gap)
+    # SL = prev_fib - buffer
     # fib_gap = trigger_fib - prev_fib (인접 Fib 레벨 간격)
     use_fib_based_sl: bool = False    # Fib 기반 SL 사용 여부
     fib_sl_fallback_mult: float = 1.5 # Fib 레벨 부족 시 폴백 ATR 배수
+    # === PR-FIB-SL-FIX: Buffer = fib_gap × ratio (TF 미스매치 해결) ===
+    # 기존: buffer = min(atr, fib_gap) → 15m ATR($60)이 항상 선택됨
+    # 수정: buffer = fib_gap * ratio → Fib 스케일과 비례
+    fib_sl_buffer_ratio: float = 0.15 # buffer = fib_gap × 0.15 (15~25% 권장)
+
+    # === RR 강제 SL: TP 기준으로 SL 계산 ===
+    # SL = entry - (TP - entry) / rr_enforced_ratio (LONG)
+    # SL = entry + (entry - TP) / rr_enforced_ratio (SHORT)
+    use_rr_enforced_sl: bool = False  # RR 기반 SL 강제
+    rr_enforced_ratio: float = 2.0    # 목표 RR (2.0 = 2:1)
 
     # === PR-A: ATR TF for Risk ===
     # SL/TP/MFE/BE 계산에 사용할 ATR의 타임프레임
@@ -407,6 +446,41 @@ class Config:
     use_rr_gate: bool = False             # RR Gate 사용
     min_rr_net: float = 1.2               # 최소 RR (1.2 = 손실 $1당 수익 $1.2 기대)
     rr_gate_use_tp1: bool = True          # TP1 기준 RR 계산 (False면 TP2)
+
+    # === PR-FIB-SL-FIX: RR 2.0 TP Gate (스킵 모드) ===
+    # SL 조이기 대신 TP 기반 필터: tp_min = entry + risk * ratio
+    # tp_min이 현실적으로 닿기 힘들면 트레이드 스킵
+    use_rr_min_tp_gate: bool = False      # RR 기반 TP 도달 가능성 필터
+    rr_min_tp_ratio: float = 2.0          # tp_min = entry + risk * 2.0
+
+    # === MODE77: Max Risk Filter (과대 리스크 스킵) ===
+    # R 자체가 너무 큰 트레이드는 스킵 (SL 조이기 대신 나쁜 구조 버리기)
+    use_max_risk_filter: bool = False
+    max_risk_pct: float = 2.0             # risk_pct = R / entry > 2.0% 면 스킵
+    max_risk_atr_mult: float = 3.0        # R / ATR > 3.0 이면 스킵
+
+    # === MODE77: TP_min (2R) 부분청산 강제 ===
+    # 게이트는 2R 가능 판단했는데 실현 RR이 낮은 문제 해결
+    use_tp_min_partial: bool = False
+    tp_min_partial_pct: float = 0.4       # tp_min 도달시 40% 강제 청산
+    tp_min_r_mult: float = 2.0            # tp_min = entry + R * 2.0
+
+    # === MODE78: Micro SL (1H/4H 구조 기반 SL) ===
+    # 1W Fib는 Setup Zone (진입 필터), SL은 1H/4H swing으로 스케일 정합
+    use_micro_sl: bool = False            # True면 sl_tf의 swing 기반 SL 사용
+    micro_sl_tf: str = "1h"               # SL 참조 TF: "1h" | "4h"
+    micro_sl_source: str = "swing"        # "swing" (swing_low/high) | "fib_prev" (fib level)
+    micro_sl_buffer_mode: str = "atr"     # 버퍼 계산: "atr" | "fib_gap"
+    micro_sl_buffer_tf: str = "1h"        # 버퍼 ATR 참조 TF: "1h" | "4h" | "15m"
+    micro_sl_buffer_mult: float = 0.5     # buffer = ATR * mult (또는 fib_gap * mult)
+
+    # === MODE78: Micro SL Max Distance Cap ===
+    # Swing이 너무 멀면 ATR 기반으로 cap (RR 도달 가능성 확보)
+    micro_sl_max_atr_dist: float = 2.0    # SL 최대 거리 = ATR * mult (1H ATR 기준)
+
+    # === MODE78: Exit Priority (2R 전 조기 청산 제한) ===
+    # TP_min(2R)이 트리거되기 전에는 5m_div_partial 비활성화
+    use_exit_priority_2r: bool = False    # True면 2R 전 5m_div_partial 비활성화
 
     # === PR4-R6: Liquidation Mode (고레버리지 + 무손절 실험) ===
     # SL 대신 리퀴데이션 가격을 손절로 사용, RR≥2 진입 필터
@@ -517,6 +591,12 @@ class Config:
     early_exit_mfe_mult_hot: float = 0.2  # HOT: MFE < 0.2*ATR (더 공격적)
     stale_loss_mult_hot: float = 0.2      # HOT: StaleLoss -0.2*ATR (더 빠른 손절)
 
+    # PR-WINNER-PROTECT: 승자 보호 (MFE >= N*R 이후 조기청산 금지)
+    use_winner_protect: bool = False      # 승자 보호 활성화
+    winner_protect_r: float = 1.0         # MFE가 이 R 배수 이상이면 조기청산 금지
+    gateflip_confirm_bars: int = 3        # GateFlip 확정 전 연속 bars (히스테리시스)
+    early_exit_mode: str = "exit"         # "exit" = 청산, "tighten" = 스탑 타이트닝만
+
     # === Trailing Stop (PR3.7) - 수익 보존용 트레일링 스탑 ===
     use_trailing_stop: bool = False       # Trailing Stop 활성화
     trailing_activation_atr: float = 1.0  # MFE가 N ATR 이상일 때 트레일링 시작
@@ -524,14 +604,34 @@ class Config:
     use_5m_div_trailing: bool = False     # 5m 다이버전스 발생 시 트레일링 즉시 활성화
     use_5m_div_partial_trailing: bool = False  # 5m 다이버전스 시 50% 청산 + 나머지 트레일링
 
+    # === PR-SLTP-REWORK: 2단 SL + R기반 Trailing ===
+    # Soft SL: 15m 스윙 기반 (실제 손실 제어)
+    use_soft_sl_15m: bool = False         # Soft SL 사용
+    soft_sl_swing_lookback: int = 48      # 스윙 계산 lookback (15m bars, 48=12시간)
+    soft_sl_atr_k: float = 0.3            # 스윙 아래 buffer (k * ATR)
+
+    # R 기반 Trailing
+    trailing_mode: str = "atr"            # "atr" (기존) | "r_based" (R 기반)
+    trailing_activate_r: float = 1.0      # R >= N 시 trailing 활성화
+    trailing_min_atr: float = 0.8         # trailing distance 최소값 (ATR 단위)
+    trailing_risk_frac: float = 0.25      # trailing distance = risk의 N% (risk = entry-SL)
+
+    # 5m Div Exit 역할 분리
+    use_5m_div_loss_cut: bool = False     # 손실 상태에서 5m div로 조기 청산
+    div_loss_cut_only_upnl_negative: bool = True  # uPnL < 0일 때만 청산
+    div_profit_partial_enabled: bool = True       # 이익 상태 partial 허용
+    div_profit_min_r: float = 1.0         # R >= N일 때만 이익 partial 허용
+
     # 레짐 기반 Hidden Divergence 전략 (새로운 접근법)
     use_regime_hidden_strategy: bool = False  # 레짐 방향 + Hidden Divergence
     # BULL → Hidden Bullish만 Long
     # BEAR → Hidden Bearish만 Short
     # RANGE → 진입 안함
 
-    # Hidden Divergence 추가 (Regular + Hidden 동시 사용)
-    use_hidden_div_long: bool = False  # Regular Div + Hidden Bullish Div 동시 사용
+    # Divergence 타입 선택
+    use_regular_div_long: bool = True   # Regular Bullish Divergence 사용
+    use_hidden_div_long: bool = False   # Hidden Bullish Divergence 사용
+    use_5m_entry_fallback: bool = True  # 15m 실패 시 5m fallback 사용
 
     # === FeatureStore (P5) ===
     # Centralized feature computation with FAIL-CLOSED warmup validation
@@ -589,11 +689,11 @@ class Config:
         margin_bars = _duration_to_bars(self.warmup_margin_duration, self.trigger_tf)
 
         # trigger_tf 전용 lookback들 (이 TF에서 직접 계산되는 지표들)
+        # NOTE: early_exit_time_bars는 포지션 보유 시간이지 지표 lookback이 아니므로 제외
         required_lookbacks_trigger = [
             self.atr_period,                    # ATR 계산
             self.zone_depth_lookback,           # Zone depth
             self.cooldown_bars,                 # Cooldown
-            self.early_exit_time_bars,          # Early exit
         ]
         # NOTE: trend_lookback_1h, trend_lookback_4h는 context_tf에서 계산되므로
         # trigger_tf warmup에 포함하지 않음 (해당 TF 데이터에서만 필요)
@@ -1976,13 +2076,14 @@ def needed_close_for_hidden_bearish(
 # =============================================================================
 # 참조점 찾기
 # =============================================================================
-def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: float = 20.0) -> Optional[Dict]:
+def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: float = 20.0, transition_mode: bool = False) -> Optional[Dict]:
     """최근 oversold 구간의 저점
 
     Args:
         df: OHLC + stoch_d + rsi DataFrame
         lookback: 참조 윈도우 크기
         threshold: 과매도 임계값 (PR4-R0: 하드코딩 제거)
+        transition_mode: True면 과매도 탈출 직후에도 참조점 찾음 (EXP-ENTRY-1)
     """
     if len(df) < 10:
         return None
@@ -2010,17 +2111,34 @@ def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: fl
     if not segments:
         return None
 
-    # 직전봉이 과매도일 때만 전 세그먼트 사용 (lookahead 방지: 현재봉은 미확정)
+    # === EXP-ENTRY-1: transition_mode 분기 ===
     if len(d) < 2:
         return None
+
     prev_oversold = np.isfinite(d[-2]) and d[-2] <= threshold
-    if not prev_oversold:
-        return None  # 직전봉이 과매도 아니면 참조점 없음
 
-    if len(segments) < 2:
-        return None  # 전 세그먼트가 없으면 참조점 없음
-
-    seg = segments[-2]  # 전 세그먼트 (현재 세그먼트 제외)
+    if transition_mode:
+        # Transition 모드: 과매도 탈출 직후 (d[-2] >= threshold)
+        # 가장 최근 완료된 과매도 세그먼트 사용
+        if len(segments) < 1:
+            return None  # 과매도 세그먼트가 없으면 참조점 없음
+        # 마지막 세그먼트가 방금 끝난 것인지 확인
+        last_seg = segments[-1]
+        # 세그먼트 끝이 d[-3] 이전이어야 (d[-2]는 이미 탈출한 봉)
+        if last_seg[1] >= n - 2:
+            # 세그먼트가 아직 진행 중이면 그 전 세그먼트 사용
+            if len(segments) < 2:
+                return None
+            seg = segments[-2]
+        else:
+            seg = last_seg
+    else:
+        # 기존 모드: 직전봉이 과매도일 때만 전 세그먼트 사용
+        if not prev_oversold:
+            return None  # 직전봉이 과매도 아니면 참조점 없음
+        if len(segments) < 2:
+            return None  # 전 세그먼트가 없으면 참조점 없음
+        seg = segments[-2]  # 전 세그먼트 (현재 세그먼트 제외)
 
     a, b = seg
     seg_close = close[a:b+1]
@@ -2189,6 +2307,129 @@ def find_swing_high_reference(df: pd.DataFrame, lookback: int = 50, min_bars_bac
         return None
 
     return {'ref_price': ref_price, 'ref_rsi': ref_rsi}
+
+
+# === MODE78: Micro SL Helper Functions ===
+def get_micro_swing_low(df: pd.DataFrame, lookback: int = 20, min_bars_back: int = 2) -> Optional[float]:
+    """
+    MODE78: 1H/4H 구조 기반 SL용 스윙 저점 찾기.
+
+    Args:
+        df: 1H 또는 4H OHLCV DataFrame
+        lookback: 검색 범위 (bars)
+        min_bars_back: 최소 몇 바 전 데이터부터 검색
+
+    Returns:
+        스윙 저점 가격 (없으면 None)
+    """
+    if len(df) < lookback:
+        lookback = len(df)
+    if lookback < 10:
+        return None
+
+    low = df['low'].values[-lookback:]
+    n = len(low)
+
+    if n < min_bars_back + 5:
+        return None
+
+    # 최근 min_bars_back 이전의 데이터에서 검색
+    search_low = low[:-min_bars_back] if min_bars_back > 0 else low
+
+    if len(search_low) < 5:
+        return None
+
+    # 스윙 저점: 좌우 2개 바보다 낮은 점
+    swing_lows = []
+    for i in range(2, len(search_low) - 2):
+        if (search_low[i] < search_low[i-1] and search_low[i] < search_low[i-2] and
+            search_low[i] < search_low[i+1] and search_low[i] < search_low[i+2]):
+            swing_lows.append((i, search_low[i]))
+
+    if not swing_lows:
+        # 스윙 저점이 없으면 기간 내 최저점 사용
+        return float(search_low.min())
+
+    # 가장 최근 스윙 저점 반환
+    return float(swing_lows[-1][1])
+
+
+def get_micro_swing_high(df: pd.DataFrame, lookback: int = 20, min_bars_back: int = 2) -> Optional[float]:
+    """
+    MODE78: 1H/4H 구조 기반 SL용 스윙 고점 찾기 (SHORT용).
+
+    Args:
+        df: 1H 또는 4H OHLCV DataFrame
+        lookback: 검색 범위 (bars)
+        min_bars_back: 최소 몇 바 전 데이터부터 검색
+
+    Returns:
+        스윙 고점 가격 (없으면 None)
+    """
+    if len(df) < lookback:
+        lookback = len(df)
+    if lookback < 10:
+        return None
+
+    high = df['high'].values[-lookback:]
+    n = len(high)
+
+    if n < min_bars_back + 5:
+        return None
+
+    # 최근 min_bars_back 이전의 데이터에서 검색
+    search_high = high[:-min_bars_back] if min_bars_back > 0 else high
+
+    if len(search_high) < 5:
+        return None
+
+    # 스윙 고점: 좌우 2개 바보다 높은 점
+    swing_highs = []
+    for i in range(2, len(search_high) - 2):
+        if (search_high[i] > search_high[i-1] and search_high[i] > search_high[i-2] and
+            search_high[i] > search_high[i+1] and search_high[i] > search_high[i+2]):
+            swing_highs.append((i, search_high[i]))
+
+    if not swing_highs:
+        # 스윙 고점이 없으면 기간 내 최고점 사용
+        return float(search_high.max())
+
+    # 가장 최근 스윙 고점 반환
+    return float(swing_highs[-1][1])
+
+
+def get_micro_atr(df: pd.DataFrame, period: int = 14) -> Optional[float]:
+    """
+    MODE78: 1H/4H ATR 계산 (버퍼용).
+
+    Args:
+        df: 1H 또는 4H OHLCV DataFrame
+        period: ATR 기간
+
+    Returns:
+        ATR 값 (없으면 None)
+    """
+    if len(df) < period + 1:
+        return None
+
+    if 'atr' in df.columns:
+        atr_val = df['atr'].iloc[-1]
+        if np.isfinite(atr_val):
+            return float(atr_val)
+
+    # ATR 계산 (precomputed 없을 경우)
+    high = df['high'].values
+    low = df['low'].values
+    close = df['close'].values
+
+    tr = np.maximum(
+        high[-period:] - low[-period:],
+        np.maximum(
+            np.abs(high[-period:] - close[-period-1:-1]),
+            np.abs(low[-period:] - close[-period-1:-1])
+        )
+    )
+    return float(np.mean(tr))
 
 
 def find_oversold_reference_hybrid(
@@ -2561,13 +2802,38 @@ def is_near_dynamic_fib_level(
     if dynfib_state is None or not dynfib_state.is_valid():
         return False, None
 
-    # Dynamic Fib 레벨 계산 (0.0과 1.0 포함)
-    extended_ratios = (0.0,) + tuple(ratios) + (1.0,)
+    # Dynamic Fib 레벨 계산 (-4 ~ +4 확장)
+    # BUG FIX: 중복 제거 + 정렬로 인덱스 매핑 문제 해결
+    EXTENDED_DOWN = (-4.0, -3.618, -3.0, -2.618, -2.0, -1.618, -1.0, -0.618, -0.382, -0.236)
+    EXTENDED_UP = (1.272, 1.414, 1.618, 2.0, 2.618, 3.0, 3.618, 4.0)
+    all_ratios = set(EXTENDED_DOWN + (0.0,) + tuple(ratios) + (1.0,) + EXTENDED_UP)
+    l0_ratios = tuple(sorted(all_ratios))  # L0 비율들
+
+    # L1 레벨 추가 (dynfib_max_depth >= 1인 경우)
+    # L1은 L0 구간 사이에 0.236, 0.382, 0.5, 0.618, 0.786 비율 적용 (0.0, 1.0 제외 - 중복)
+    L1_SUB_RATIOS = (0.236, 0.382, 0.5, 0.618, 0.786)
+    extended_ratios = list(l0_ratios)
+    level_depths = {r: 0 for r in l0_ratios}  # depth 추적: ratio -> depth
+
+    if getattr(config, 'dynfib_max_depth', 0) >= 1:
+        for i in range(len(l0_ratios) - 1):
+            l0_low = l0_ratios[i]
+            l0_high = l0_ratios[i + 1]
+            l0_gap = l0_high - l0_low
+            for sub_r in L1_SUB_RATIOS:
+                l1_ratio = l0_low + l0_gap * sub_r
+                if l1_ratio not in level_depths:  # 중복 방지
+                    extended_ratios.append(l1_ratio)
+                    level_depths[l1_ratio] = 1
+
+    extended_ratios = tuple(sorted(extended_ratios))
+
     dyn_levels = get_dynamic_fib_levels(
         dynfib_state.low,
         dynfib_state.high,
         extended_ratios,
-        space=config.dynamic_fib_space
+        space=config.dynamic_fib_space,
+        direction=dynfib_state.direction
     )
 
     if not dyn_levels:
@@ -2577,11 +2843,13 @@ def is_near_dynamic_fib_level(
     closest_price = min(dyn_levels, key=lambda lvl: abs(lvl - price))
     closest_idx = dyn_levels.index(closest_price)
     closest_ratio = extended_ratios[closest_idx] if closest_idx < len(extended_ratios) else 0.5
+    closest_depth = level_depths.get(closest_ratio, 0)  # L0=0, L1=1
 
     # Tolerance 계산 (config 기반)
     if config.fib_tolerance_mode == "fib_gap":
         # fib_gap 모드: mult = 현재 Fib 구간의 gap (되돌림 변화량)
-        FIB_BOUNDARIES = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+        # 확장 레벨 포함 (-4 ~ +4)
+        FIB_BOUNDARIES = [-4.0, -3.618, -3.0, -2.618, -2.0, -1.618, -1.0, -0.618, -0.382, -0.236, 0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.272, 1.414, 1.618, 2.0, 2.618, 3.0, 3.618, 4.0]
         gap = 0.236  # 기본값
         for i in range(len(FIB_BOUNDARIES) - 1):
             if FIB_BOUNDARIES[i] <= closest_ratio <= FIB_BOUNDARIES[i + 1]:
@@ -2636,7 +2904,7 @@ def is_near_dynamic_fib_level(
 
         # price가 zone 내에 있는지 직접 체크
         if lower_boundary_price <= price <= upper_boundary_price:
-            fib_level = FibLevel(price=closest_price, fib_ratio=closest_ratio, depth=0, cell=(0, 0))
+            fib_level = FibLevel(price=closest_price, fib_ratio=closest_ratio, depth=closest_depth, cell=(0, 0))
             return True, fib_level
         else:
             return False, None
@@ -2646,8 +2914,8 @@ def is_near_dynamic_fib_level(
     distance_pct = abs(closest_price - price) / closest_price if closest_price > 0 else 1.0
 
     if distance_pct <= effective_tolerance:
-        # FibLevel 객체 생성 (dynamic fib는 depth=0, cell=(0,0)으로 표시)
-        fib_level = FibLevel(price=closest_price, fib_ratio=closest_ratio, depth=0, cell=(0, 0))
+        # FibLevel 객체 생성 (depth: L0=0, L1=1)
+        fib_level = FibLevel(price=closest_price, fib_ratio=closest_ratio, depth=closest_depth, cell=(0, 0))
         return True, fib_level
 
     return False, None
@@ -2664,13 +2932,15 @@ def is_near_fib_level_combined(
 
     Args:
         price: 체크할 가격
-        atr: ATR 값
-        config: Config
-        dynfib_state: DynamicFibAnchorState (None이면 Macro만 체크)
 
-    Returns:
-        (is_near: bool, fib_level: Optional[FibLevel], source: "macro"|"dynfib"|"none")
+    Note:
+        use_fib_entry_filter=False이면 항상 True 반환 (다이버전스만으로 진입)
     """
+    # PR-MODE79: Fib 진입 필터 OFF → 항상 매칭으로 처리 (더미 FibLevel 반환)
+    if not config.use_fib_entry_filter:
+        dummy_fib = FibLevel(price=price, fib_ratio=0.0, depth=0, cell=(0, 0))
+        return True, dummy_fib, "no_filter"
+
     # 1. Macro Fib 체크 (use_macro_fib=True일 때만)
     is_near_macro = False
     fib_level_macro = None
@@ -2682,9 +2952,32 @@ def is_near_fib_level_combined(
     fib_level_dyn = None
     if config.use_dynamic_fib and config.dynfib_use_as in ("both", "entry_filter"):
         if dynfib_state is not None and dynfib_state.is_valid():
-            is_near_dyn, fib_level_dyn = is_near_dynamic_fib_level(
-                price, dynfib_state, atr, config, config.dynfib_ratios
-            )
+            # PR-MODE63: 저변동성 필터 - 0~0.236 구간이 충분히 넓은지 체크
+            if config.use_min_fib_gap_filter:
+                fib_low = dynfib_state.low
+                fib_high = dynfib_state.high
+                if config.dynamic_fib_space == "log" and fib_low > 0 and fib_high > fib_low:
+                    # Log space: level_0.236 = low * (high/low)^0.236
+                    level_0 = fib_low
+                    level_236 = fib_low * ((fib_high / fib_low) ** 0.236)
+                else:
+                    # Linear space: level_0.236 = low + range * 0.236
+                    fib_range = fib_high - fib_low
+                    level_0 = fib_low
+                    level_236 = fib_low + fib_range * 0.236
+
+                gap_pct = (level_236 - level_0) / price * 100 if price > 0 else 0
+                if gap_pct < config.min_fib_gap_pct:
+                    # 저변동성: Dynamic Fib 매칭 건너뜀
+                    pass
+                else:
+                    is_near_dyn, fib_level_dyn = is_near_dynamic_fib_level(
+                        price, dynfib_state, atr, config, config.dynfib_ratios
+                    )
+            else:
+                is_near_dyn, fib_level_dyn = is_near_dynamic_fib_level(
+                    price, dynfib_state, atr, config, config.dynfib_ratios
+                )
 
     # 3. 결과 결정
     if is_near_macro and is_near_dyn:
@@ -2826,7 +3119,8 @@ def calc_fib_based_sl(
     atr: float,
     fib_levels: List[float],
     side: str = "long",
-    fallback_atr_mult: float = 1.5
+    fallback_atr_mult: float = 1.5,
+    buffer_ratio: float = 0.15
 ) -> Tuple[float, float, float]:
     """
     Fib 구조 기반 SL 계산.
@@ -2835,7 +3129,7 @@ def calc_fib_based_sl(
         1. entry_fib = entry_price 근처(이하)의 Fib 레벨
         2. prev_fib = entry_fib 바로 아래 Fib 레벨
         3. fib_gap = entry_fib - prev_fib
-        4. buffer = min(ATR, fib_gap)  # fib_gap 넘어가면 다음 레벨 침범
+        4. buffer = fib_gap × buffer_ratio (TF 미스매치 해결)
         5. SL = prev_fib - buffer
 
     Args:
@@ -2845,6 +3139,7 @@ def calc_fib_based_sl(
         fib_levels: 정렬된 Fib 레벨 리스트 (오름차순)
         side: "long" or "short"
         fallback_atr_mult: Fib 레벨 부족 시 폴백 ATR 배수
+        buffer_ratio: buffer = fib_gap × ratio (기본 0.15)
 
     Returns:
         (sl_price, buffer, fib_gap)
@@ -2865,10 +3160,10 @@ def calc_fib_based_sl(
         levels_at_or_below = [f for f in sorted_levels if f <= entry_price + tolerance]
 
         if len(levels_at_or_below) < 2:
-            # Fib 레벨 2개 미만이면 폴백
+            # Fib 레벨 2개 미만이면 폴백 (ATR 기반)
             fib_gap = atr * fallback_atr_mult
-            buffer = min(atr, fib_gap)
-            sl = entry_price - atr * fallback_atr_mult
+            buffer = atr * fallback_atr_mult  # 폴백은 ATR 사용
+            sl = entry_price - buffer
             return sl, buffer, fib_gap
 
         # 2. entry_fib = entry_price에 가장 가까운 Fib (이하)
@@ -2879,7 +3174,7 @@ def calc_fib_based_sl(
         if not levels_below_entry_fib:
             # entry_fib가 가장 낮은 Fib이면 폴백
             fib_gap = atr * fallback_atr_mult
-            buffer = min(atr, fib_gap)
+            buffer = atr * fallback_atr_mult
             sl = entry_fib - buffer
             return sl, buffer, fib_gap
 
@@ -2888,8 +3183,10 @@ def calc_fib_based_sl(
         # 4. fib_gap = entry_fib - prev_fib
         fib_gap = entry_fib - prev_fib
 
-        # 5. buffer = min(ATR, fib_gap)
-        buffer = min(atr, fib_gap) if fib_gap > 0 else atr * 0.5
+        # 5. buffer = fib_gap × buffer_ratio (TF 미스매치 해결)
+        # 기존: min(atr, fib_gap) → 15m ATR이 항상 선택됨
+        # 수정: fib_gap * ratio → Fib 스케일과 비례
+        buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
 
         # 6. SL = prev_fib - buffer
         sl = prev_fib - buffer
@@ -2903,10 +3200,10 @@ def calc_fib_based_sl(
         levels_at_or_above = [f for f in sorted_levels if f >= entry_price - tolerance]
 
         if len(levels_at_or_above) < 2:
-            # Fib 레벨 2개 미만이면 폴백
+            # Fib 레벨 2개 미만이면 폴백 (ATR 기반)
             fib_gap = atr * fallback_atr_mult
-            buffer = min(atr, fib_gap)
-            sl = entry_price + atr * fallback_atr_mult
+            buffer = atr * fallback_atr_mult
+            sl = entry_price + buffer
             return sl, buffer, fib_gap
 
         # 2. entry_fib = entry_price에 가장 가까운 Fib (이상)
@@ -2917,7 +3214,7 @@ def calc_fib_based_sl(
         if not levels_above_entry_fib:
             # entry_fib가 가장 높은 Fib이면 폴백
             fib_gap = atr * fallback_atr_mult
-            buffer = min(atr, fib_gap)
+            buffer = atr * fallback_atr_mult
             sl = entry_fib + buffer
             return sl, buffer, fib_gap
 
@@ -2926,13 +3223,130 @@ def calc_fib_based_sl(
         # 4. fib_gap = prev_fib - entry_fib
         fib_gap = prev_fib - entry_fib
 
-        # 5. buffer = min(ATR, fib_gap)
-        buffer = min(atr, fib_gap) if fib_gap > 0 else atr * 0.5
+        # 5. buffer = fib_gap × buffer_ratio (TF 미스매치 해결)
+        buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
 
         # 6. SL = prev_fib + buffer
         sl = prev_fib + buffer
 
         return sl, buffer, fib_gap
+
+
+def calc_soft_sl_15m(
+    side: str,
+    entry_price: float,
+    df_15m: pd.DataFrame,
+    entry_idx: int,
+    lookback: int = 48,
+    atr_k: float = 0.3
+) -> Tuple[float, float, float]:
+    """
+    15m 스윙 기반 Soft SL 계산.
+
+    Args:
+        side: "long" or "short"
+        entry_price: 진입 가격
+        df_15m: 15분봉 DataFrame (low, high, atr 컬럼 필요)
+        entry_idx: 진입 bar index
+        lookback: 스윙 계산 lookback (기본 48 = 12시간)
+        atr_k: 스윙 아래/위 buffer 배수 (기본 0.3)
+
+    Returns:
+        (soft_sl, swing_ref, buffer) 튜플
+        - soft_sl: Soft SL 가격
+        - swing_ref: 스윙 기준가 (LONG: swing_low, SHORT: swing_high)
+        - buffer: ATR 기반 buffer
+    """
+    start_idx = max(0, entry_idx - lookback)
+    end_idx = entry_idx
+
+    if start_idx >= end_idx:
+        # lookback 부족 시 entry 기준 폴백
+        atr = df_15m['atr'].iloc[entry_idx] if 'atr' in df_15m.columns else 100.0
+        buffer = atr * atr_k
+        if side == "long":
+            return entry_price - atr, entry_price, buffer
+        else:
+            return entry_price + atr, entry_price, buffer
+
+    # ATR 가져오기
+    atr = df_15m['atr'].iloc[entry_idx] if 'atr' in df_15m.columns else 100.0
+    buffer = atr * atr_k
+
+    if side == "long":
+        # LONG: 최근 N bars의 최저점 - buffer
+        swing_low = df_15m['low'].iloc[start_idx:end_idx].min()
+        soft_sl = swing_low - buffer
+        return soft_sl, swing_low, buffer
+    else:
+        # SHORT: 최근 N bars의 최고점 + buffer
+        swing_high = df_15m['high'].iloc[start_idx:end_idx].max()
+        soft_sl = swing_high + buffer
+        return soft_sl, swing_high, buffer
+
+
+def compose_sl(
+    side: str,
+    hard_sl: float,
+    soft_sl: float,
+    entry_price: float
+) -> Tuple[float, str]:
+    """
+    Hard SL과 Soft SL 중 더 가까운(보수적인) SL 선택.
+
+    Args:
+        side: "long" or "short"
+        hard_sl: Fib 기반 Hard SL
+        soft_sl: 15m 스윙 기반 Soft SL
+        entry_price: 진입 가격
+
+    Returns:
+        (final_sl, sl_source) 튜플
+        - final_sl: 최종 SL 가격
+        - sl_source: "hard" | "soft"
+    """
+    if side == "long":
+        # LONG: 더 높은(entry에 가까운) SL 선택
+        if soft_sl > hard_sl:
+            return soft_sl, "soft"
+        else:
+            return hard_sl, "hard"
+    else:
+        # SHORT: 더 낮은(entry에 가까운) SL 선택
+        if soft_sl < hard_sl:
+            return soft_sl, "soft"
+        else:
+            return hard_sl, "hard"
+
+
+def calc_r_value(
+    side: str,
+    entry: float,
+    current_price: float,
+    sl: float
+) -> float:
+    """
+    R 값 계산 (리스크 대비 수익).
+
+    Args:
+        side: "long" or "short"
+        entry: 진입 가격
+        current_price: 현재 가격
+        sl: 손절 가격
+
+    Returns:
+        R 값 (0 = 본전, 1.0 = 리스크만큼 수익, 음수 = 손실)
+    """
+    if side == "long":
+        risk = entry - sl
+        if risk <= 0:
+            return 0.0
+        return (current_price - entry) / risk
+    else:
+        risk = sl - entry
+        if risk <= 0:
+            return 0.0
+        return (entry - current_price) / risk
 
 
 @dataclass
@@ -3235,6 +3649,25 @@ class StrategyA:
             'RR_GATE_SHORT_LOW_RR': 0,  # SHORT 진입 RR 부족
         }
 
+        # PR-SHADOW: Shadow Trade 저장소
+        shadow_trades = []  # ProbGate 등으로 reject된 시그널들의 가상 거래 결과
+
+        # 진단 카운터: 신호 생성 단계별 필터링 추적
+        signal_diag = {
+            'total_15m_bars': 0,                # 전체 15m 바 수
+            'stoch_oversold_triggers': 0,       # StochRSI oversold 조건 만족
+            'find_ref_success': 0,              # find_oversold_reference 성공
+            'find_ref_fail': 0,                 # find_oversold_reference 실패
+            'div_price_success': 0,             # 다이버전스 가격 계산 성공
+            'div_price_fail': 0,                # 다이버전스 가격 계산 실패
+            'fib_match_success': 0,             # Fib 레벨 매칭 성공
+            'fib_match_fail': 0,                # Fib 레벨 매칭 실패
+            'bar_low_touch_success': 0,         # bar_low <= div_price 성공
+            'bar_low_touch_fail': 0,            # bar_low > div_price 실패
+            'prob_gate_pass': 0,                # ProbGate 통과
+            'prob_gate_reject': 0,              # ProbGate 거부
+        }
+
         # PR-DYN-FIB: 동적 Fib 앵커 상태 초기화
         dynfib_state = None
         df_1w = None  # 1W ZigZag용 데이터
@@ -3242,12 +3675,15 @@ class StrategyA:
             dynfib_state = create_initial_state(self.config.dynamic_fib_mode)
             print(f"  [PR-DYN-FIB] Dynamic Fib enabled | mode={self.config.dynamic_fib_mode}, "
                   f"tf={self.config.dynamic_fib_tf}, lookback={self.config.dynfib_lookback_bars}, use_as={self.config.dynfib_use_as}")
-            # 1W 타임프레임 사용 시 1W 데이터 로드
+            # 1W 타임프레임 사용 시 1W 데이터 로드 (ZigZag용 1년치 히스토리)
             if self.config.dynamic_fib_tf == "1w":
                 try:
-                    start_date = df_15m.index.min().strftime("%Y-%m-%d")
+                    # 1W ZigZag는 충분한 히스토리 필요 → 1년 전부터 로드
+                    from datetime import timedelta
+                    fib_start = df_15m.index.min() - timedelta(days=365)
+                    start_date_1w = fib_start.strftime("%Y-%m-%d")
                     end_date = df_15m.index.max().strftime("%Y-%m-%d")
-                    df_1w = load_data("1w", start_date, end_date, self.config)
+                    df_1w = load_data("1w", start_date_1w, end_date, self.config)
                     print(f"  [PR-DYN-FIB] Loaded {len(df_1w)} 1W bars for ZigZag")
                 except Exception as e:
                     print(f"  [PR-DYN-FIB] WARNING: Failed to load 1W data: {e}")
@@ -3298,6 +3734,8 @@ class StrategyA:
             if current_15m_bar_time != last_15m_bar_time:
                 # 새 15m 바 진입 - 직전 확정봉의 StochRSI로 시그널 판단
                 # iloc[-2] = 방금 확정된 15분봉 (예: 14:00 시점에서 13:45~14:00 봉)
+                signal_diag['total_15m_bars'] += 1  # 진단: 15m 바 카운트
+
                 if len(df_15m_slice) >= 2:
                     prev_confirmed_stoch = df_15m_slice['stoch_d'].iloc[-2]
                     if not np.isfinite(prev_confirmed_stoch):
@@ -3305,12 +3743,39 @@ class StrategyA:
                 else:
                     prev_confirmed_stoch = 50.0
 
-                # 과매도 상태: 직전 확정봉의 StochRSI가 threshold 이하
+                # 과매도/과매수 임계값
                 oversold_thr = self.config.stoch_rsi_oversold
                 overbought_thr = self.config.stoch_rsi_overbought
-                long_signal_triggered = (prev_confirmed_stoch <= oversold_thr)
-                # 과매수 상태: 직전 확정봉의 StochRSI가 threshold 이상
-                short_signal_triggered = (prev_confirmed_stoch >= overbought_thr)
+
+                # === EXP-ENTRY-1: StochRSI 시그널 모드 ===
+                if self.config.stoch_signal_mode == "transition":
+                    # 전환 모드: 과매도 아래에서 위로 복귀할 때만 시그널
+                    # prev_prev_stoch < oversold AND prev_stoch >= oversold
+                    if len(df_15m_slice) >= 3:
+                        prev_prev_stoch = df_15m_slice['stoch_d'].iloc[-3]
+                        if not np.isfinite(prev_prev_stoch):
+                            prev_prev_stoch = 50.0
+                        # LONG: 과매도 탈출 (이전 봉 < 20, 직전 봉 >= 20)
+                        long_signal_triggered = (prev_prev_stoch < oversold_thr) and (prev_confirmed_stoch >= oversold_thr)
+                        # SHORT: 과매수 탈출 (이전 봉 > 80, 직전 봉 <= 80)
+                        short_signal_triggered = (prev_prev_stoch > overbought_thr) and (prev_confirmed_stoch <= overbought_thr)
+                    else:
+                        long_signal_triggered = False
+                        short_signal_triggered = False
+                elif self.config.stoch_signal_mode == "not_oversold":
+                    # not_oversold 모드: 과매도가 아닐 때만 시그널 (회복 후 진입)
+                    # 직전봉 StochRSI > 20이면 LONG 허용
+                    long_signal_triggered = (prev_confirmed_stoch > oversold_thr)
+                    # 직전봉 StochRSI < 80이면 SHORT 허용
+                    short_signal_triggered = (prev_confirmed_stoch < overbought_thr)
+                else:
+                    # 상태 모드 (기본): 과매도 상태이면 시그널
+                    long_signal_triggered = (prev_confirmed_stoch <= oversold_thr)
+                    short_signal_triggered = (prev_confirmed_stoch >= overbought_thr)
+
+                # 진단: StochRSI 조건 만족 카운트
+                if long_signal_triggered:
+                    signal_diag['stoch_oversold_triggers'] += 1
 
                 last_15m_bar_time = current_15m_bar_time
             else:
@@ -3390,6 +3855,35 @@ class StrategyA:
                     long_position['mfe_first_6'] = max(long_position.get('mfe_first_6', long_position['entry_price']), bar['high'])
                     long_position['mae_first_6'] = min(long_position.get('mae_first_6', long_position['entry_price']), bar['low'])
 
+                # === MODE77: TP_min (2R) 부분청산 강제 - LONG ===
+                # 게이트가 2R 가능 판단했으면, 2R 도달 시 반드시 일부 수익 실현
+                if self.config.use_tp_min_partial and not long_position.get('tp_min_partial_done', False):
+                    entry_price = long_position['entry_price']
+                    initial_sl = long_position.get('initial_sl', long_position['sl'])
+                    risk = entry_price - initial_sl
+                    tp_min = entry_price + risk * self.config.tp_min_r_mult
+
+                    if bar['high'] >= tp_min:
+                        # TP_min 도달 - 부분청산
+                        exit_price = tp_min  # 정확히 tp_min에서 청산 가정
+                        partial_ratio = self.config.tp_min_partial_pct
+                        trade = self._close_position_partial(
+                            long_position, exit_price, 'TP_min_2R', current_time, partial_ratio
+                        )
+                        result.trades.append(trade)
+                        equity += trade.pnl_usd
+                        result.equity_curve.append(equity)
+
+                        long_position['tp_min_partial_done'] = True
+                        long_position['remaining'] = long_position.get('remaining', 1.0) - partial_ratio
+
+                        # 로깅: planned_rr, realized_rr
+                        planned_rr = self.config.tp_min_r_mult
+                        realized_pnl = exit_price - entry_price
+                        realized_rr = realized_pnl / risk if risk > 0 else 0
+                        print(f"    [TP_min HIT] 2R=${tp_min:,.0f} | Closed {partial_ratio*100:.0f}% @ ${exit_price:,.0f}")
+                        print(f"      planned_rr={planned_rr:.1f}, realized_rr={realized_rr:.2f}")
+
                 # === PR4-R4b: MFE 기반 브레이크이븐 + 부분익절 ===
                 if self.config.use_breakeven and not long_position.get('be_triggered', False):
                     entry_atr = long_position.get('atr', current_atr)
@@ -3411,7 +3905,7 @@ class StrategyA:
                         new_sl = long_position['entry_price'] + (self.config.be_buffer_atr * entry_atr)
                         long_position['sl'] = new_sl
                         long_position['be_triggered'] = True
-                        long_position['remaining'] = 1.0 - partial_ratio
+                        long_position['remaining'] = long_position.get('remaining', 1.0) - partial_ratio  # BUG FIX: 누적 차감
 
                         print(f"    [BE TRIGGERED] MFE ${mfe_move:.0f} >= {self.config.be_mfe_atr} ATR (${be_threshold:.0f})")
                         print(f"      Partial exit: {partial_ratio*100:.0f}% @ ${partial_exit_price:,.0f}")
@@ -3421,20 +3915,48 @@ class StrategyA:
                 if self.config.use_trailing_stop:
                     entry_atr = long_position.get('atr', current_atr)
                     mfe_move = long_position['mfe'] - long_position['entry_price']
-                    activation_threshold = self.config.trailing_activation_atr * entry_atr
 
-                    if mfe_move >= activation_threshold:
-                        # 트레일링 활성화: 고점에서 N ATR 뒤에서 추적
-                        trailing_sl = long_position['mfe'] - (self.config.trailing_distance_atr * entry_atr)
+                    # PR-SLTP-REWORK: R 기반 trailing 모드
+                    if self.config.trailing_mode == "r_based":
+                        # R 값 계산
+                        entry_price = long_position['entry_price']
+                        current_high = long_position['mfe']
+                        initial_sl = long_position.get('initial_sl', long_position['sl'])
+                        r_value = calc_r_value("long", entry_price, current_high, initial_sl)
 
-                        # 트레일링 SL은 기존 SL보다 높을 때만 업데이트 (Long)
-                        if trailing_sl > long_position['sl']:
-                            old_sl = long_position['sl']
-                            long_position['sl'] = trailing_sl
-                            if not long_position.get('trailing_activated', False):
-                                long_position['trailing_activated'] = True
-                                print(f"    [TRAILING ACTIVATED] MFE ${mfe_move:.0f} >= {self.config.trailing_activation_atr} ATR")
-                            print(f"    [TRAILING SL] ${old_sl:,.0f} → ${trailing_sl:,.0f} (MFE: ${long_position['mfe']:,.0f})")
+                        if r_value >= self.config.trailing_activate_r:
+                            # R 기반 trailing distance
+                            risk = entry_price - initial_sl
+                            trail_dist = max(
+                                self.config.trailing_min_atr * entry_atr,
+                                self.config.trailing_risk_frac * risk
+                            )
+                            trailing_sl = current_high - trail_dist
+
+                            if trailing_sl > long_position['sl']:
+                                old_sl = long_position['sl']
+                                long_position['sl'] = trailing_sl
+                                if not long_position.get('trailing_activated', False):
+                                    long_position['trailing_activated'] = True
+                                    long_position['initial_sl'] = initial_sl  # 초기 SL 저장
+                                    print(f"    [TRAILING ACTIVATED R-based] R={r_value:.2f} >= {self.config.trailing_activate_r}")
+                                print(f"    [TRAILING SL] ${old_sl:,.0f} → ${trailing_sl:,.0f} (R={r_value:.2f}, MFE: ${current_high:,.0f})")
+                    else:
+                        # 기존 ATR 기반 trailing
+                        activation_threshold = self.config.trailing_activation_atr * entry_atr
+
+                        if mfe_move >= activation_threshold:
+                            # 트레일링 활성화: 고점에서 N ATR 뒤에서 추적
+                            trailing_sl = long_position['mfe'] - (self.config.trailing_distance_atr * entry_atr)
+
+                            # 트레일링 SL은 기존 SL보다 높을 때만 업데이트 (Long)
+                            if trailing_sl > long_position['sl']:
+                                old_sl = long_position['sl']
+                                long_position['sl'] = trailing_sl
+                                if not long_position.get('trailing_activated', False):
+                                    long_position['trailing_activated'] = True
+                                    print(f"    [TRAILING ACTIVATED] MFE ${mfe_move:.0f} >= {self.config.trailing_activation_atr} ATR")
+                                print(f"    [TRAILING SL] ${old_sl:,.0f} → ${trailing_sl:,.0f} (MFE: ${long_position['mfe']:,.0f})")
 
             if short_position is not None:
                 short_position['mfe'] = min(short_position.get('mfe', short_position['entry_price']), bar['low'])
@@ -3444,6 +3966,34 @@ class StrategyA:
                 if bars_held <= 6:
                     short_position['mfe_first_6'] = min(short_position.get('mfe_first_6', short_position['entry_price']), bar['low'])
                     short_position['mae_first_6'] = max(short_position.get('mae_first_6', short_position['entry_price']), bar['high'])
+
+                # === MODE77: TP_min (2R) 부분청산 강제 - SHORT ===
+                if self.config.use_tp_min_partial and not short_position.get('tp_min_partial_done', False):
+                    entry_price = short_position['entry_price']
+                    initial_sl = short_position.get('initial_sl', short_position['sl'])
+                    risk = initial_sl - entry_price  # SHORT
+                    tp_min = entry_price - risk * self.config.tp_min_r_mult  # SHORT: 아래로
+
+                    if bar['low'] <= tp_min:
+                        # TP_min 도달 - 부분청산
+                        exit_price = tp_min
+                        partial_ratio = self.config.tp_min_partial_pct
+                        trade = self._close_position_partial(
+                            short_position, exit_price, 'TP_min_2R', current_time, partial_ratio
+                        )
+                        result.trades.append(trade)
+                        equity += trade.pnl_usd
+                        result.equity_curve.append(equity)
+
+                        short_position['tp_min_partial_done'] = True
+                        short_position['remaining'] = short_position.get('remaining', 1.0) - partial_ratio
+
+                        # 로깅
+                        planned_rr = self.config.tp_min_r_mult
+                        realized_pnl = entry_price - exit_price  # SHORT
+                        realized_rr = realized_pnl / risk if risk > 0 else 0
+                        print(f"    [TP_min HIT SHORT] 2R=${tp_min:,.0f} | Closed {partial_ratio*100:.0f}% @ ${exit_price:,.0f}")
+                        print(f"      planned_rr={planned_rr:.1f}, realized_rr={realized_rr:.2f}")
 
                 # === PR4-R4b: MFE 기반 브레이크이븐 + 부분익절 (Short) ===
                 if self.config.use_breakeven and not short_position.get('be_triggered', False):
@@ -3466,7 +4016,7 @@ class StrategyA:
                         new_sl = short_position['entry_price'] - (self.config.be_buffer_atr * entry_atr)
                         short_position['sl'] = new_sl
                         short_position['be_triggered'] = True
-                        short_position['remaining'] = 1.0 - partial_ratio
+                        short_position['remaining'] = short_position.get('remaining', 1.0) - partial_ratio  # BUG FIX: 누적 차감
 
                         print(f"    [BE TRIGGERED SHORT] MFE ${mfe_move:.0f} >= {self.config.be_mfe_atr} ATR")
                         print(f"      Partial exit: {partial_ratio*100:.0f}% @ ${partial_exit_price:,.0f}")
@@ -3476,20 +4026,48 @@ class StrategyA:
                 if self.config.use_trailing_stop:
                     entry_atr = short_position.get('atr', current_atr)
                     mfe_move = short_position['entry_price'] - short_position['mfe']  # Short는 반대
-                    activation_threshold = self.config.trailing_activation_atr * entry_atr
 
-                    if mfe_move >= activation_threshold:
-                        # 트레일링 활성화: 저점에서 N ATR 위에서 추적
-                        trailing_sl = short_position['mfe'] + (self.config.trailing_distance_atr * entry_atr)
+                    # PR-SLTP-REWORK: R 기반 trailing 모드
+                    if self.config.trailing_mode == "r_based":
+                        # R 값 계산
+                        entry_price = short_position['entry_price']
+                        current_low = short_position['mfe']
+                        initial_sl = short_position.get('initial_sl', short_position['sl'])
+                        r_value = calc_r_value("short", entry_price, current_low, initial_sl)
 
-                        # 트레일링 SL은 기존 SL보다 낮을 때만 업데이트 (Short)
-                        if trailing_sl < short_position['sl']:
-                            old_sl = short_position['sl']
-                            short_position['sl'] = trailing_sl
-                            if not short_position.get('trailing_activated', False):
-                                short_position['trailing_activated'] = True
-                                print(f"    [TRAILING ACTIVATED SHORT] MFE ${mfe_move:.0f} >= {self.config.trailing_activation_atr} ATR")
-                            print(f"    [TRAILING SL SHORT] ${old_sl:,.0f} → ${trailing_sl:,.0f} (MFE: ${short_position['mfe']:,.0f})")
+                        if r_value >= self.config.trailing_activate_r:
+                            # R 기반 trailing distance
+                            risk = initial_sl - entry_price
+                            trail_dist = max(
+                                self.config.trailing_min_atr * entry_atr,
+                                self.config.trailing_risk_frac * risk
+                            )
+                            trailing_sl = current_low + trail_dist
+
+                            if trailing_sl < short_position['sl']:
+                                old_sl = short_position['sl']
+                                short_position['sl'] = trailing_sl
+                                if not short_position.get('trailing_activated', False):
+                                    short_position['trailing_activated'] = True
+                                    short_position['initial_sl'] = initial_sl  # 초기 SL 저장
+                                    print(f"    [TRAILING ACTIVATED R-based SHORT] R={r_value:.2f} >= {self.config.trailing_activate_r}")
+                                print(f"    [TRAILING SL SHORT] ${old_sl:,.0f} → ${trailing_sl:,.0f} (R={r_value:.2f}, MFE: ${current_low:,.0f})")
+                    else:
+                        # 기존 ATR 기반 trailing
+                        activation_threshold = self.config.trailing_activation_atr * entry_atr
+
+                        if mfe_move >= activation_threshold:
+                            # 트레일링 활성화: 저점에서 N ATR 위에서 추적
+                            trailing_sl = short_position['mfe'] + (self.config.trailing_distance_atr * entry_atr)
+
+                            # 트레일링 SL은 기존 SL보다 낮을 때만 업데이트 (Short)
+                            if trailing_sl < short_position['sl']:
+                                old_sl = short_position['sl']
+                                short_position['sl'] = trailing_sl
+                                if not short_position.get('trailing_activated', False):
+                                    short_position['trailing_activated'] = True
+                                    print(f"    [TRAILING ACTIVATED SHORT] MFE ${mfe_move:.0f} >= {self.config.trailing_activation_atr} ATR")
+                                print(f"    [TRAILING SL SHORT] ${old_sl:,.0f} → ${trailing_sl:,.0f} (MFE: ${short_position['mfe']:,.0f})")
 
             # === Early Exit (PR3.5): SL 전 조기 청산 ===
             if self.config.use_early_exit:
@@ -3515,26 +4093,40 @@ class StrategyA:
                     mfe_mult = self.config.early_exit_mfe_mult_hot if is_hot else self.config.early_exit_mfe_mult
                     stale_mult = self.config.stale_loss_mult_hot if is_hot else 0.3
 
+                    # PR-WINNER-PROTECT: R 계산 및 보호 체크
+                    risk = long_position['entry_price'] - long_position['sl']
+                    current_r = mfe_move / risk if risk > 0 else 0
+                    is_winner_protected = (self.config.use_winner_protect and
+                                           current_r >= self.config.winner_protect_r)
+
                     # 1a) TimeStop: N bars 후 MFE < threshold*ATR이면 조기 청산
-                    if bars_held >= time_bars:
+                    if bars_held >= time_bars and not is_winner_protected:
                         if mfe_move < mfe_mult * entry_atr:
                             early_exit_triggered = True
                             early_exit_reason = 'TimeStop_HOT' if is_hot else 'TimeStop'
 
-                    # 1b) StaleLoss: N bars 후 유의미한 손실이면 조기 청산
-                    if not early_exit_triggered and bars_held >= time_bars:
+                    # 1b) StaleLoss: N bars 후 유의미한 손실이면 조기 청산 (승자보호 시 스킵)
+                    if not early_exit_triggered and bars_held >= time_bars and not is_winner_protected:
                         if current_pnl < -stale_mult * entry_atr:
                             early_exit_triggered = True
                             early_exit_reason = 'StaleLoss_HOT' if is_hot else 'StaleLoss'
 
-                    # 2) GateFlip Exit: ProbGate 방향 반전 시 청산 (손실 상태에서만)
-                    if self.config.use_gate_flip_exit and prob_gate_result is not None and current_pnl < 0 and not early_exit_triggered:
-                        if i < len(prob_gate_result) and prob_gate_result.iloc[i]['action_code'] == -1:  # SHORT 전환
-                            early_exit_triggered = True
-                            early_exit_reason = 'GateFlip'
+                    # 2) GateFlip Exit: ProbGate 방향 반전 시 청산 (손실 상태 + 승자보호 아닐 때만)
+                    # PR-GATEFLIP-HYSTERESIS: N연속 반대 신호 확인 후에만 청산
+                    if self.config.use_gate_flip_exit and prob_gate_result is not None and not early_exit_triggered and not is_winner_protected:
+                        if i < len(prob_gate_result):
+                            action_code = prob_gate_result.iloc[i]['action_code']
+                            if action_code == -1:  # SHORT 신호
+                                long_position['gateflip_count'] = long_position.get('gateflip_count', 0) + 1
+                                # 연속 N봉 이상 + 손실 상태일 때만 청산
+                                if long_position['gateflip_count'] >= self.config.gateflip_confirm_bars and current_pnl < 0:
+                                    early_exit_triggered = True
+                                    early_exit_reason = 'GateFlip'
+                            else:
+                                long_position['gateflip_count'] = 0  # 리셋
 
-                    # 3) Opposite Div Early (손실 상태에서만): 반대 Div 시 SL 전 조기 탈출
-                    if self.config.use_opposite_div_early and current_pnl < 0 and not early_exit_triggered:
+                    # 3) Opposite Div Early (손실 상태 + 승자보호 아닐 때만): 반대 Div 시 SL 전 조기 탈출
+                    if self.config.use_opposite_div_early and current_pnl < 0 and not early_exit_triggered and not is_winner_protected:
                         if self._check_short_divergence(df_5m_slice):
                             early_exit_triggered = True
                             early_exit_reason = 'EarlyDiv'
@@ -3571,26 +4163,40 @@ class StrategyA:
                     mfe_mult = self.config.early_exit_mfe_mult_hot if is_hot else self.config.early_exit_mfe_mult
                     stale_mult = self.config.stale_loss_mult_hot if is_hot else 0.3
 
+                    # PR-WINNER-PROTECT: R 계산 및 보호 체크 (SHORT)
+                    risk = short_position['sl'] - short_position['entry_price']
+                    current_r = mfe_move / risk if risk > 0 else 0
+                    is_winner_protected = (self.config.use_winner_protect and
+                                           current_r >= self.config.winner_protect_r)
+
                     # 1a) TimeStop
-                    if bars_held >= time_bars:
+                    if bars_held >= time_bars and not is_winner_protected:
                         if mfe_move < mfe_mult * entry_atr:
                             early_exit_triggered = True
                             early_exit_reason = 'TimeStop_HOT' if is_hot else 'TimeStop'
 
-                    # 1b) StaleLoss: N bars 후 유의미한 손실이면 조기 청산
-                    if not early_exit_triggered and bars_held >= time_bars:
+                    # 1b) StaleLoss: N bars 후 유의미한 손실이면 조기 청산 (승자보호 시 스킵)
+                    if not early_exit_triggered and bars_held >= time_bars and not is_winner_protected:
                         if current_pnl < -stale_mult * entry_atr:
                             early_exit_triggered = True
                             early_exit_reason = 'StaleLoss_HOT' if is_hot else 'StaleLoss'
 
-                    # 2) GateFlip Exit (손실 상태에서만)
-                    if self.config.use_gate_flip_exit and prob_gate_result is not None and current_pnl < 0 and not early_exit_triggered:
-                        if i < len(prob_gate_result) and prob_gate_result.iloc[i]['action_code'] == 1:  # LONG 전환
-                            early_exit_triggered = True
-                            early_exit_reason = 'GateFlip'
+                    # 2) GateFlip Exit (손실 상태 + 승자보호 아닐 때만)
+                    # PR-GATEFLIP-HYSTERESIS: N연속 반대 신호 확인 후에만 청산
+                    if self.config.use_gate_flip_exit and prob_gate_result is not None and not early_exit_triggered and not is_winner_protected:
+                        if i < len(prob_gate_result):
+                            action_code = prob_gate_result.iloc[i]['action_code']
+                            if action_code == 1:  # LONG 신호
+                                short_position['gateflip_count'] = short_position.get('gateflip_count', 0) + 1
+                                # 연속 N봉 이상 + 손실 상태일 때만 청산
+                                if short_position['gateflip_count'] >= self.config.gateflip_confirm_bars and current_pnl < 0:
+                                    early_exit_triggered = True
+                                    early_exit_reason = 'GateFlip'
+                            else:
+                                short_position['gateflip_count'] = 0  # 리셋
 
-                    # 3) Opposite Div Early (손실 상태에서만)
-                    if self.config.use_opposite_div_early and current_pnl < 0 and not early_exit_triggered:
+                    # 3) Opposite Div Early (손실 상태 + 승자보호 아닐 때만)
+                    if self.config.use_opposite_div_early and current_pnl < 0 and not early_exit_triggered and not is_winner_protected:
                         if self._check_long_divergence(df_5m_slice):
                             early_exit_triggered = True
                             early_exit_reason = 'EarlyDiv'
@@ -3609,7 +4215,8 @@ class StrategyA:
             if long_position is not None:
                 # SL 체크 (최우선) - PR4-R6: LIQ 모드면 'LIQ' 라벨
                 if bar['low'] <= long_position['sl']:
-                    exit_price = long_position['sl']
+                    # Gap 반영: SL 아래로 gap down 시 시가에서 청산 (보수적)
+                    exit_price = min(long_position['sl'], bar['open'])
                     remaining = long_position.get('remaining', 1.0)
                     # Exit reason: LIQ > SL_BE > SL
                     if long_position.get('is_liq_mode', False):
@@ -3619,6 +4226,17 @@ class StrategyA:
                     else:
                         exit_reason = 'SL'
                     trade = self._close_position_partial(long_position, exit_price, exit_reason, current_time, remaining)
+                    # MODE78-DEBUG: SL Exit 로그
+                    entry_price = long_position['entry_price']
+                    sl_price = long_position['sl']
+                    tp1_price = long_position.get('tp1', 0)
+                    mfe = long_position.get('mfe', 0)
+                    sl_dist = entry_price - sl_price
+                    tp_dist = tp1_price - entry_price if tp1_price > 0 else 0
+                    print(f"  [LONG SL EXIT] {current_time}")
+                    print(f"    Entry=${entry_price:,.0f} | SL=${sl_price:,.0f} | TP1=${tp1_price:,.0f}")
+                    print(f"    SL_dist=${sl_dist:,.0f} ({sl_dist/entry_price*100:.2f}%) | TP_dist=${tp_dist:,.0f} ({tp_dist/entry_price*100:.2f}%)")
+                    print(f"    MFE=${mfe:,.0f} | Exit=${exit_price:,.0f} | PnL=${trade.pnl_usd:.2f}")
                     result.trades.append(trade)
                     equity += trade.pnl_usd
                     result.equity_curve.append(equity)
@@ -3627,21 +4245,40 @@ class StrategyA:
                 # TP1 체크 (50% 청산 + SL→Breakeven)
                 elif not long_position.get('tp1_hit', False) and bar['high'] >= long_position['tp1']:
                     exit_price = long_position['tp1']
-                    # PR6.2: 설정된 비율로 부분 청산
-                    tp1_ratio = self.config.tp_split_ratios[0] if self.config.use_tp_split else 0.5
+                    # EXP-EXIT-1: R 기반 모드일 때 config 비율 사용
+                    if self.config.tp_mode == "r_based":
+                        tp1_ratio = self.config.r_tp1_pct
+                    elif self.config.use_tp_split:
+                        tp1_ratio = self.config.tp_split_ratios[0]
+                    else:
+                        tp1_ratio = 0.5
                     trade = self._close_position_partial(long_position, exit_price, 'TP1', current_time, tp1_ratio)
                     result.trades.append(trade)
                     equity += trade.pnl_usd
                     result.equity_curve.append(equity)
-                    # SL을 Breakeven으로 이동, TP1 히트 플래그 설정
-                    long_position['sl'] = long_position['entry_price']
+                    # SL을 Breakeven으로 이동 (R 기반 모드 또는 use_be_stop_on_tp1)
+                    if self.config.tp_mode == "r_based" and self.config.use_be_stop_on_tp1:
+                        long_position['sl'] = long_position['entry_price']
+                        long_position['be_triggered'] = True
+                    elif self.config.tp_mode != "r_based":
+                        long_position['sl'] = long_position['entry_price']
                     long_position['tp1_hit'] = True
                     long_position['remaining'] = 1.0 - tp1_ratio
                     print(f"    [TP1 HIT] ${exit_price:,.0f} | SL→BE: ${long_position['sl']:,.0f} | Closed: {tp1_ratio*100:.0f}%")
                 # TP2 체크
                 elif long_position.get('tp1_hit', False) and not long_position.get('tp2_hit', False) and bar['high'] >= long_position['tp2']:
                     exit_price = long_position['tp2']
-                    if self.config.use_tp_split:
+                    # EXP-EXIT-1: R 기반 모드일 때 config 비율 사용
+                    if self.config.tp_mode == "r_based":
+                        tp2_ratio = self.config.r_tp2_pct
+                        trade = self._close_position_partial(long_position, exit_price, 'TP2', current_time, tp2_ratio)
+                        result.trades.append(trade)
+                        equity += trade.pnl_usd
+                        result.equity_curve.append(equity)
+                        long_position['tp2_hit'] = True
+                        long_position['remaining'] = self.config.r_runner_pct  # Runner 남김
+                        print(f"    [TP2 HIT +2R] ${exit_price:,.0f} | Closed: {tp2_ratio*100:.0f}% | Runner: {self.config.r_runner_pct*100:.0f}%")
+                    elif self.config.use_tp_split:
                         # PR6.2: 3단계 분할 - TP2는 30%
                         tp2_ratio = self.config.tp_split_ratios[1]
                         trade = self._close_position_partial(long_position, exit_price, 'TP2', current_time, tp2_ratio)
@@ -3671,21 +4308,62 @@ class StrategyA:
                     long_position = None
                 # 5m 숏 다이버전스 → 부분청산+트레일링 / 트레일링 / 즉시 청산
                 elif self.config.use_5m_div_exit and self._check_short_divergence(df_5m_slice):
-                    if self.config.use_5m_div_partial_trailing and not long_position.get('div_partial_done', False):
-                        # 50% 청산 + 나머지 트레일링
-                        exit_price = bar['close']
-                        trade = self._close_position_partial(long_position, exit_price, '5m_Div_Partial', current_time, 0.5)
-                        result.trades.append(trade)
-                        equity += trade.pnl_usd
-                        result.equity_curve.append(equity)
-                        # 나머지 50%에 트레일링 활성화
-                        entry_atr = long_position.get('entry_atr', 300)
-                        trailing_sl = bar['high'] - (self.config.trailing_distance_atr * entry_atr)
-                        if trailing_sl > long_position['sl']:
-                            long_position['sl'] = trailing_sl
-                        long_position['trailing_activated'] = True
-                        long_position['div_partial_done'] = True
-                        print(f"    [5m DIV -> 50% CLOSE + TRAILING] Closed 50% at ${exit_price:,.0f}, Trailing SL=${long_position['sl']:,.0f}")
+                    # PR-SLTP-REWORK: 5m Div 역할 분리 (손실 컷 vs 이익 partial)
+                    if self.config.use_5m_div_loss_cut:
+                        entry_price = long_position['entry_price']
+                        current_price = bar['close']
+                        upnl = current_price - entry_price  # Long: 현재가 - 진입가
+                        initial_sl = long_position.get('initial_sl', long_position['sl'])
+                        r_value = calc_r_value("long", entry_price, current_price, initial_sl)
+
+                        if upnl < 0:
+                            # 손실 상태: 전체 청산 (나쁜 트레이드 조기 컷)
+                            exit_price = current_price
+                            remaining = long_position.get('remaining', 1.0)
+                            trade = self._close_position_partial(long_position, exit_price, '5m_Div_LossCut', current_time, remaining)
+                            result.trades.append(trade)
+                            equity += trade.pnl_usd
+                            result.equity_curve.append(equity)
+                            print(f"    [5m DIV LOSS CUT] uPnL=${upnl:,.0f} < 0, Exit @ ${exit_price:,.0f}")
+                            long_position = None
+                        elif self.config.div_profit_partial_enabled and r_value >= self.config.div_profit_min_r:
+                            # 이익 상태 + R >= min_r: partial 허용
+                            if not long_position.get('div_partial_done', False):
+                                exit_price = current_price
+                                trade = self._close_position_partial(long_position, exit_price, '5m_Div_Profit_Partial', current_time, 0.5)
+                                result.trades.append(trade)
+                                equity += trade.pnl_usd
+                                result.equity_curve.append(equity)
+                                # 나머지 50%에 트레일링 활성화
+                                entry_atr = long_position.get('entry_atr', 300)
+                                trailing_sl = bar['high'] - (self.config.trailing_distance_atr * entry_atr)
+                                if trailing_sl > long_position['sl']:
+                                    long_position['sl'] = trailing_sl
+                                long_position['trailing_activated'] = True
+                                long_position['div_partial_done'] = True
+                                print(f"    [5m DIV PROFIT PARTIAL] R={r_value:.2f} >= {self.config.div_profit_min_r}, Closed 50% @ ${exit_price:,.0f}")
+                        # else: 이익 상태지만 R < min_r → 아무것도 안함 (trailing 지속)
+                    elif self.config.use_5m_div_partial_trailing and not long_position.get('div_partial_done', False):
+                        # MODE78: exit_priority_2r 활성화 시, 2R 전에는 5m_div_partial 비활성화
+                        skip_div_partial = (
+                            self.config.use_exit_priority_2r and
+                            not long_position.get('tp_min_partial_done', False)
+                        )
+                        if not skip_div_partial:
+                            # 50% 청산 + 나머지 트레일링 (기존 로직)
+                            exit_price = bar['close']
+                            trade = self._close_position_partial(long_position, exit_price, '5m_Div_Partial', current_time, 0.5)
+                            result.trades.append(trade)
+                            equity += trade.pnl_usd
+                            result.equity_curve.append(equity)
+                            # 나머지 50%에 트레일링 활성화
+                            entry_atr = long_position.get('entry_atr', 300)
+                            trailing_sl = bar['high'] - (self.config.trailing_distance_atr * entry_atr)
+                            if trailing_sl > long_position['sl']:
+                                long_position['sl'] = trailing_sl
+                            long_position['trailing_activated'] = True
+                            long_position['div_partial_done'] = True
+                            print(f"    [5m DIV -> 50% CLOSE + TRAILING] Closed 50% at ${exit_price:,.0f}, Trailing SL=${long_position['sl']:,.0f}")
                     elif self.config.use_5m_div_trailing and not long_position.get('trailing_activated', False):
                         # 트레일링 즉시 활성화 (MFE 조건 무시)
                         entry_atr = long_position.get('entry_atr', 300)
@@ -3718,7 +4396,8 @@ class StrategyA:
             if short_position is not None:
                 # SL 체크 (최우선) - PR4-R6: LIQ 모드면 'LIQ' 라벨
                 if bar['high'] >= short_position['sl']:
-                    exit_price = short_position['sl']
+                    # Gap 반영: SL 위로 gap up 시 시가에서 청산 (보수적)
+                    exit_price = max(short_position['sl'], bar['open'])
                     remaining = short_position.get('remaining', 1.0)
                     # Exit reason: LIQ > SL_BE > SL
                     if short_position.get('is_liq_mode', False):
@@ -3780,8 +4459,43 @@ class StrategyA:
                     short_position = None
                 # 5m 롱 다이버전스 → 트레일링 활성화 또는 숏 청산
                 elif self.config.use_5m_div_exit and self._check_long_divergence(df_5m_slice):
-                    if self.config.use_5m_div_trailing and not short_position.get('trailing_activated', False):
-                        # 트레일링 즉시 활성화 (MFE 조건 무시)
+                    # PR-SLTP-REWORK: 5m Div 역할 분리 (손실 컷 vs 이익 partial)
+                    if self.config.use_5m_div_loss_cut:
+                        entry_price = short_position['entry_price']
+                        current_price = bar['close']
+                        upnl = entry_price - current_price  # Short: 진입가 - 현재가
+                        initial_sl = short_position.get('initial_sl', short_position['sl'])
+                        r_value = calc_r_value("short", entry_price, current_price, initial_sl)
+
+                        if upnl < 0:
+                            # 손실 상태: 전체 청산 (나쁜 트레이드 조기 컷)
+                            exit_price = current_price
+                            remaining = short_position.get('remaining', 1.0)
+                            trade = self._close_position_partial(short_position, exit_price, '5m_Div_LossCut', current_time, remaining)
+                            result.trades.append(trade)
+                            equity += trade.pnl_usd
+                            result.equity_curve.append(equity)
+                            print(f"    [5m DIV LOSS CUT SHORT] uPnL=${upnl:,.0f} < 0, Exit @ ${exit_price:,.0f}")
+                            short_position = None
+                        elif self.config.div_profit_partial_enabled and r_value >= self.config.div_profit_min_r:
+                            # 이익 상태 + R >= min_r: partial 허용
+                            if not short_position.get('div_partial_done', False):
+                                exit_price = current_price
+                                trade = self._close_position_partial(short_position, exit_price, '5m_Div_Profit_Partial', current_time, 0.5)
+                                result.trades.append(trade)
+                                equity += trade.pnl_usd
+                                result.equity_curve.append(equity)
+                                # 나머지 50%에 트레일링 활성화
+                                entry_atr = short_position.get('entry_atr', 300)
+                                trailing_sl = bar['low'] + (self.config.trailing_distance_atr * entry_atr)
+                                if trailing_sl < short_position['sl']:
+                                    short_position['sl'] = trailing_sl
+                                short_position['trailing_activated'] = True
+                                short_position['div_partial_done'] = True
+                                print(f"    [5m DIV PROFIT PARTIAL SHORT] R={r_value:.2f} >= {self.config.div_profit_min_r}, Closed 50% @ ${exit_price:,.0f}")
+                        # else: 이익 상태지만 R < min_r → 아무것도 안함 (trailing 지속)
+                    elif self.config.use_5m_div_trailing and not short_position.get('trailing_activated', False):
+                        # 트레일링 즉시 활성화 (MFE 조건 무시) - 기존 로직
                         entry_atr = short_position.get('entry_atr', 300)
                         trailing_sl = bar['low'] + (self.config.trailing_distance_atr * entry_atr)
                         if trailing_sl < short_position['sl']:
@@ -3829,9 +4543,8 @@ class StrategyA:
                             signal_atr = pending_long_signal['atr']
                             signal_price = pending_long_signal['zone_price']
                             sl_mult = self.config.sl_atr_mult
-                            temp_sl = signal_price - (signal_atr * sl_mult)
 
-                            # TP 후보 계산 (fib_rr 방식)
+                            # TP 후보 계산 (fib_rr 방식) - 다이버전스 가격 위의 다음 Fib
                             fib_candidates = []
                             curr_p = signal_price
                             for _ in range(self.config.fib_tp_candidates + 1):
@@ -3844,18 +4557,109 @@ class StrategyA:
                             fib_candidates = fib_candidates[1:] if len(fib_candidates) > 1 else fib_candidates
                             temp_tp = fib_candidates[0] if fib_candidates else signal_price + (signal_atr * 3.0)
 
-                            # PR-FIB-ENTRY: Entry = div_price - (TP거리 × 0.5)
-                            # TP까지 거리의 30% 아래에서 진입 → RR 2.3:1 자동 보장
-                            tp_distance = temp_tp - signal_price
-                            if tp_distance <= 0:
-                                print(f"  [LONG LIMIT FAIL] {current_time} - TP <= signal_price")
-                                pending_long_signal = None
-                                continue
+                            # === PR-MODE61: RR 2:1 강제 진입가 계산 ===
+                            if self.config.rr_entry_mode == "fixed_rr":
+                                # 1. SL = 이전 Fib (다이버전스 가격 아래)
+                                # Dynamic Fib 레벨 수집
+                                fib_levels = []
+                                if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
+                                    fib_levels = get_dynamic_fib_levels(
+                                        dynfib_state.low,
+                                        dynfib_state.high,
+                                        self.config.dynfib_ratios,
+                                        space=self.config.dynamic_fib_space,
+                                        direction=dynfib_state.direction
+                                    )
+                                # Macro Fib 추가 (Macro는 방향 없음 - 기본 "up")
+                                if self.config.use_macro_fib:
+                                    macro_levels = get_dynamic_fib_levels(
+                                        self.config.fib_anchor_low,
+                                        self.config.fib_anchor_high,
+                                        self.config.dynfib_ratios,
+                                        space=self.config.fib_space,
+                                        direction="up"
+                                    )
+                                    fib_levels = list(set(fib_levels + macro_levels))
 
-                            entry_limit = signal_price - (tp_distance * self.config.entry_offset_ratio)
+                                # signal_price 아래의 이전 Fib 찾기 (최소 0.5 ATR 이상 떨어진)
+                                min_sl_dist = signal_atr * 0.5  # SL은 최소 0.5 ATR 떨어져야 의미있음
+                                fib_levels_below = sorted([f for f in fib_levels if f < signal_price - min_sl_dist], reverse=True)
 
-                            # SL도 entry 기준으로 재계산
-                            temp_sl = entry_limit - (signal_atr * sl_mult)
+                                if len(fib_levels_below) >= 1:
+                                    prev_fib = fib_levels_below[0]  # 가장 가까운 (but 최소 0.5 ATR 떨어진) Fib
+                                    # buffer = min(ATR, fib_gap의 30%) - SL을 prev_fib 아래에 둠
+                                    fib_gap = signal_price - prev_fib if prev_fib else signal_atr
+                                    buffer = min(signal_atr * 0.3, fib_gap * 0.3) if fib_gap > 0 else signal_atr * 0.3
+                                    temp_sl = prev_fib - buffer
+                                else:
+                                    # Fallback: ATR 기반 (0.5 ATR 내에 Fib가 없으면)
+                                    temp_sl = signal_price - (signal_atr * self.config.fib_sl_fallback_mult)
+
+                                # 2. Entry = (TP + 2*SL) / 3 → 정확히 RR 2:1
+                                target_rr = self.config.rr_limit_target
+                                # RR = (TP - Entry) / (Entry - SL)
+                                # Entry = (TP + target_rr * SL) / (1 + target_rr)
+                                entry_limit = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
+
+                                # 검증: Entry가 signal_price보다 높으면 RR 불가능 → 스킵
+                                # (역산 결과가 현재가보다 높으면 수학적으로 target RR 달성 불가)
+                                if entry_limit >= signal_price:
+                                    print(f"  [LONG LIMIT SKIP] {current_time} - Entry ${entry_limit:,.0f} >= signal ${signal_price:,.0f} - RR impossible")
+                                    pending_long_signal = None
+                                    continue
+
+                                # Entry가 SL보다 낮거나 같으면 (불가능한 주문) 스킵
+                                if entry_limit <= temp_sl:
+                                    print(f"  [LONG LIMIT FAIL] {current_time} - Entry ${entry_limit:,.0f} <= SL ${temp_sl:,.0f}")
+                                    pending_long_signal = None
+                                    continue
+
+                                actual_rr = (temp_tp - entry_limit) / (entry_limit - temp_sl)
+                                print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}")
+
+                            else:
+                                # RR 2:1 보장 방식 (Micro SL 기반) - MODE78
+                                # 1. Micro SL 계산 (1H swing_low - buffer)
+                                micro_sl = None
+                                if self.config.use_micro_sl and df_1h is not None:
+                                    df_micro = df_1h[df_1h.index <= current_time]
+                                    if len(df_micro) >= 10:
+                                        swing_low = get_micro_swing_low(df_micro, lookback=48)
+                                        if swing_low is not None and swing_low < signal_price:
+                                            micro_atr = get_micro_atr(df_micro) or signal_atr
+                                            sl_buffer = micro_atr * self.config.micro_sl_buffer_mult
+                                            micro_sl = swing_low - sl_buffer
+                                            # Max distance cap
+                                            max_sl = signal_price - (micro_atr * self.config.micro_sl_max_atr_dist)
+                                            if micro_sl < max_sl:
+                                                micro_sl = max_sl
+
+                                # Fallback: ATR 기반
+                                if micro_sl is None:
+                                    micro_sl = signal_price - (signal_atr * self.config.fib_sl_fallback_mult)
+                                temp_sl = micro_sl
+
+                                # 2. RR 2:1 보장 Entry 계산
+                                # Entry = (TP + target_rr * SL) / (1 + target_rr)
+                                target_rr = self.config.rr_limit_target  # 2.0
+                                max_entry = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
+
+                                # 3. 검증
+                                if max_entry <= temp_sl:
+                                    print(f"  [LONG LIMIT SKIP] {current_time} - RR impossible: max_entry=${max_entry:,.0f} <= sl=${temp_sl:,.0f}")
+                                    pending_long_signal = None
+                                    continue
+
+                                # 4. Entry 결정
+                                if max_entry >= signal_price:
+                                    # signal_price가 이미 충분히 낮음 → RR > 2.0
+                                    entry_limit = signal_price - 1  # 1틱 아래
+                                else:
+                                    # max_entry가 signal_price보다 낮음 → RR = 2.0
+                                    entry_limit = max_entry
+
+                                actual_rr = (temp_tp - entry_limit) / (entry_limit - temp_sl) if entry_limit > temp_sl else 0
+                                print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}, MicroSL")
 
                             # 현재가에서 너무 멀면 skip
                             dist_atr = (bar['close'] - entry_limit) / signal_atr
@@ -3868,7 +4672,6 @@ class StrategyA:
                             pending_long_signal['entry_limit'] = entry_limit
                             pending_long_signal['pre_sl'] = temp_sl
                             pending_long_signal['pre_tp'] = temp_tp
-                            print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}")
 
                         # Limit fill 체크
                         entry_limit = pending_long_signal['entry_limit']
@@ -3960,6 +4763,22 @@ class StrategyA:
                         if not pass_gate:
                             prob_gate_rejects[gate_reason] += 1
                             print(f"  [LONG REJECTED] {current_time} - {gate_reason} (p_bull={p_bull:.3f})")
+                            # PR-SHADOW: Shadow Trade 기록
+                            if self.config.track_shadow_trades and pending_long_signal is not None:
+                                shadow_entry = pending_long_signal.get('fill_price') or pending_long_signal.get('entry_limit')
+                                shadow_sl = pending_long_signal.get('pre_sl')
+                                shadow_tp = pending_long_signal.get('pre_tp')
+                                if shadow_entry and shadow_sl:
+                                    shadow_trades.append({
+                                        'direction': 'LONG',
+                                        'timestamp': current_time,
+                                        'entry': shadow_entry,
+                                        'sl': shadow_sl,
+                                        'tp': shadow_tp,
+                                        'reject_reason': gate_reason,
+                                        'p_bull': p_bull,
+                                        'atr': pending_long_signal.get('atr', current_atr),
+                                    })
                             pending_long_signal = None
                             continue
 
@@ -4061,8 +4880,69 @@ class StrategyA:
                         entry_price = pending_long_signal['fill_price']
                         atr = pending_long_signal['atr']
 
-                        # PR-FIB-SL: Fib 구조 기반 SL
-                        if self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
+                        # PR-MODE61: fixed_rr 또는 offset_ratio+use_micro_sl 모드에서는 pre_sl 사용 (RR 2:1 보장을 위해 재계산 금지)
+                        use_pre_sl = 'pre_sl' in pending_long_signal and (
+                            self.config.rr_entry_mode == "fixed_rr" or
+                            (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
+                        )
+                        if use_pre_sl:
+                            sl = pending_long_signal['pre_sl']
+                            actual_rr = (pending_long_signal.get('pre_tp', entry_price + atr * 2) - entry_price) / (entry_price - sl) if entry_price > sl else 0
+                            print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (pre_sl locked, RR={actual_rr:.2f})")
+                        # === MODE78: Micro SL (1H/4H swing 기반) - pre_sl 없는 경우 fallback ===
+                        elif self.config.use_micro_sl:
+                            # 1) Micro TF DataFrame 선택
+                            if self.config.micro_sl_tf == "4h" and df_4h is not None:
+                                df_micro = df_4h[df_4h.index <= current_time]
+                                micro_lookback = 20  # 4H: 20 bars = 80시간
+                            elif df_1h is not None:
+                                df_micro = df_1h[df_1h.index <= current_time]
+                                micro_lookback = 48  # 1H: 48 bars = 48시간
+                            else:
+                                df_micro = None
+                                micro_lookback = 0
+
+                            # 2) Swing Low 찾기
+                            swing_low = None
+                            if df_micro is not None and len(df_micro) >= 10:
+                                swing_low = get_micro_swing_low(df_micro, lookback=micro_lookback)
+
+                            # 3) Micro ATR 계산 (버퍼용)
+                            micro_atr = None
+                            if self.config.micro_sl_buffer_tf == "4h" and df_4h is not None:
+                                df_buf = df_4h[df_4h.index <= current_time]
+                                micro_atr = get_micro_atr(df_buf) if len(df_buf) >= 15 else None
+                            elif self.config.micro_sl_buffer_tf == "1h" and df_1h is not None:
+                                df_buf = df_1h[df_1h.index <= current_time]
+                                micro_atr = get_micro_atr(df_buf) if len(df_buf) >= 15 else None
+                            else:
+                                micro_atr = atr  # fallback to 15m ATR
+
+                            if micro_atr is None:
+                                micro_atr = atr
+
+                            # 4) SL 계산: swing_low - buffer (with max distance cap)
+                            if swing_low is not None and swing_low < entry_price:
+                                sl_buffer = micro_atr * self.config.micro_sl_buffer_mult
+                                swing_sl = swing_low - sl_buffer
+
+                                # Max distance cap: entry - (micro_atr * max_mult)
+                                max_sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
+
+                                # Take the higher (closer to entry) of the two
+                                if swing_sl < max_sl:
+                                    sl = max_sl
+                                    sl_source = f"MicroSL_capped_{self.config.micro_sl_max_atr_dist}ATR"
+                                else:
+                                    sl = swing_sl
+                                    sl_source = f"MicroSL_{self.config.micro_sl_tf}"
+                                print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({sl_source}, swing=${swing_low:,.0f}, buf=${sl_buffer:.0f})")
+                            else:
+                                # Fallback: ATR 기반 SL
+                                sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
+                                print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (MicroSL fallback, no valid swing)")
+                        # PR-FIB-SL: Fib 구조 기반 SL (기존 모드)
+                        elif self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
                             trigger_fib = pending_long_signal['fib_level'].price
                             # Dynamic Fib 레벨 수집
                             fib_levels = []
@@ -4070,13 +4950,27 @@ class StrategyA:
                                 fib_levels = get_dynamic_fib_levels(
                                     dynfib_state.low, dynfib_state.high,
                                     self.config.dynfib_ratios,
-                                    space=self.config.dynamic_fib_space
+                                    space=self.config.dynamic_fib_space,
+                                    direction=dynfib_state.direction
                                 )
-                            sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
+                            hard_sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
                                 entry_price, trigger_fib, atr, fib_levels,
-                                side="long", fallback_atr_mult=self.config.fib_sl_fallback_mult
+                                side="long", fallback_atr_mult=self.config.fib_sl_fallback_mult,
+                                buffer_ratio=self.config.fib_sl_buffer_ratio
                             )
-                            print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
+                            # PR-SLTP-REWORK: Soft SL 합성
+                            if self.config.use_soft_sl_15m:
+                                soft_sl, swing_ref, soft_buffer = calc_soft_sl_15m(
+                                    "long", entry_price, df_15m_slice,
+                                    len(df_15m_slice) - 1,
+                                    self.config.soft_sl_swing_lookback,
+                                    self.config.soft_sl_atr_k
+                                )
+                                sl, sl_source = compose_sl("long", hard_sl, soft_sl, entry_price)
+                                print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({sl_source}, hard=${hard_sl:,.0f}, soft=${soft_sl:,.0f})")
+                            else:
+                                sl = hard_sl
+                                print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
                         else:
                             # BUG FIX: SL을 fill_price 기준으로 재계산 (pre_sl은 signal_price 기준이라 틀림)
                             sl = entry_price - (atr * self.config.sl_atr_mult)
@@ -4085,8 +4979,58 @@ class StrategyA:
                         entry_price = bar['close']
                         atr = pending_long_signal['atr']
 
+                        # === MODE78: Micro SL (1H/4H swing 기반) ===
+                        if self.config.use_micro_sl:
+                            # 1) Micro TF DataFrame 선택
+                            if self.config.micro_sl_tf == "4h" and df_4h is not None:
+                                df_micro = df_4h[df_4h.index <= current_time]
+                                micro_lookback = 20
+                            elif df_1h is not None:
+                                df_micro = df_1h[df_1h.index <= current_time]
+                                micro_lookback = 48
+                            else:
+                                df_micro = None
+                                micro_lookback = 0
+
+                            # 2) Swing Low 찾기
+                            swing_low = None
+                            if df_micro is not None and len(df_micro) >= 10:
+                                swing_low = get_micro_swing_low(df_micro, lookback=micro_lookback)
+
+                            # 3) Micro ATR 계산
+                            micro_atr = None
+                            if self.config.micro_sl_buffer_tf == "4h" and df_4h is not None:
+                                df_buf = df_4h[df_4h.index <= current_time]
+                                micro_atr = get_micro_atr(df_buf) if len(df_buf) >= 15 else None
+                            elif self.config.micro_sl_buffer_tf == "1h" and df_1h is not None:
+                                df_buf = df_1h[df_1h.index <= current_time]
+                                micro_atr = get_micro_atr(df_buf) if len(df_buf) >= 15 else None
+                            else:
+                                micro_atr = atr
+
+                            if micro_atr is None:
+                                micro_atr = atr
+
+                            # 4) SL 계산: swing_low - buffer (with max distance cap)
+                            if swing_low is not None and swing_low < entry_price:
+                                sl_buffer = micro_atr * self.config.micro_sl_buffer_mult
+                                swing_sl = swing_low - sl_buffer
+
+                                # Max distance cap
+                                max_sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
+
+                                if swing_sl < max_sl:
+                                    sl = max_sl
+                                    sl_source = f"MicroSL_capped_{self.config.micro_sl_max_atr_dist}ATR"
+                                else:
+                                    sl = swing_sl
+                                    sl_source = f"MicroSL_{self.config.micro_sl_tf}"
+                                print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({sl_source}, swing=${swing_low:,.0f}, buf=${sl_buffer:.0f})")
+                            else:
+                                sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
+                                print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (MicroSL fallback)")
                         # PR-FIB-SL: Fib 구조 기반 SL
-                        if self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
+                        elif self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
                             trigger_fib = pending_long_signal['fib_level'].price
                             # Dynamic Fib 레벨 수집
                             fib_levels = []
@@ -4094,13 +5038,27 @@ class StrategyA:
                                 fib_levels = get_dynamic_fib_levels(
                                     dynfib_state.low, dynfib_state.high,
                                     self.config.dynfib_ratios,
-                                    space=self.config.dynamic_fib_space
+                                    space=self.config.dynamic_fib_space,
+                                    direction=dynfib_state.direction
                                 )
-                            sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
+                            hard_sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
                                 entry_price, trigger_fib, atr, fib_levels,
-                                side="long", fallback_atr_mult=self.config.fib_sl_fallback_mult
+                                side="long", fallback_atr_mult=self.config.fib_sl_fallback_mult,
+                                buffer_ratio=self.config.fib_sl_buffer_ratio
                             )
-                            print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
+                            # PR-SLTP-REWORK: Soft SL 합성
+                            if self.config.use_soft_sl_15m:
+                                soft_sl, swing_ref, soft_buffer = calc_soft_sl_15m(
+                                    "long", entry_price, df_15m_slice,
+                                    len(df_15m_slice) - 1,
+                                    self.config.soft_sl_swing_lookback,
+                                    self.config.soft_sl_atr_k
+                                )
+                                sl, sl_source = compose_sl("long", hard_sl, soft_sl, entry_price)
+                                print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({sl_source}, hard=${hard_sl:,.0f}, soft=${soft_sl:,.0f})")
+                            else:
+                                sl = hard_sl
+                                print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
                         else:
                             # 동적 SL 배수 계산
                             if self.cycle_dynamics and len(df_15m_slice) >= self.config.cycle_lookback:
@@ -4114,7 +5072,21 @@ class StrategyA:
 
                     # PR4-R0: TP 모드에 따라 계산
                     fib_rr_rejected = False  # fib_rr 모드에서 RR 기준 미달 시 True
-                    if self.config.tp_mode == "atr":
+
+                    # MODE78-FIX: RR limit entry에서 pre_tp 사용 (Entry와 Exit TP 일치 보장)
+                    use_pre_tp = self.config.use_rr_limit_entry and 'pre_tp' in pending_long_signal and (
+                        self.config.rr_entry_mode == "fixed_rr" or
+                        (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
+                    )
+
+                    if use_pre_tp:
+                        # Entry 계산 시 사용한 pre_tp 그대로 사용 (RR 2:1 보장)
+                        pre_tp = pending_long_signal['pre_tp']
+                        tp1 = pre_tp
+                        tp2 = pre_tp + (atr * 1.0)  # TP2: pre_tp 위 1 ATR
+                        tp3 = pre_tp + (atr * 2.0)  # TP3: pre_tp 위 2 ATR
+                        print(f"  [LONG TP] pre_tp=${pre_tp:,.0f} locked (Entry RR consistent)")
+                    elif self.config.tp_mode == "atr":
                         # ATR 배수 기반 TP (RR 안정화)
                         tp_mults = self.config.tp_atr_mults
                         tp1 = entry_price + (atr * tp_mults[0])
@@ -4143,7 +5115,8 @@ class StrategyA:
                             dyn_levels = get_dynamic_fib_levels(
                                 dynfib_state.low, dynfib_state.high,
                                 self.config.dynfib_ratios,
-                                space=self.config.dynamic_fib_space
+                                space=self.config.dynamic_fib_space,
+                                direction=dynfib_state.direction
                             )
                             # entry_price 위의 레벨만 TP 후보로 추가
                             dyn_above = [p for p in dyn_levels if p > entry_price]
@@ -4189,7 +5162,7 @@ class StrategyA:
                         if hasattr(self.config, '_tp_debug') and self.config._tp_debug:
                             print(f"  [TP-DEBUG LONG] Entry=${entry_price:.0f} | TP1=${tp1:.0f} | RR={selected_rr:.2f} | valid_tps={len(valid_tps)}")
                             if self.config.use_dynamic_fib and dynfib_state and dynfib_state.is_valid():
-                                dyn_levels = get_dynamic_fib_levels(dynfib_state.low, dynfib_state.high, self.config.dynfib_ratios, space=self.config.dynamic_fib_space)
+                                dyn_levels = get_dynamic_fib_levels(dynfib_state.low, dynfib_state.high, self.config.dynfib_ratios, space=self.config.dynamic_fib_space, direction=dynfib_state.direction)
                                 is_dyn = tp1 in dyn_levels
                                 print(f"    Anchor=({dynfib_state.low:.0f}, {dynfib_state.high:.0f}) | Range=${dynfib_state.get_range():.0f} | TP_from={'DYN' if is_dyn else 'MACRO'}")
                         # TP2, TP3는 다음 유효 TP 또는 ATR 폴백
@@ -4201,6 +5174,15 @@ class StrategyA:
                         # TP를 무한대로 설정하여 절대 도달하지 않게 함
                         tp1 = tp2 = tp3 = float('inf')
                         print(f"  [TRAILING_ONLY LONG] {current_time} - TP disabled, trailing stop only")
+                    elif self.config.tp_mode == "r_based":
+                        # EXP-EXIT-1: R 기반 부분익절 (LONG)
+                        # R = Entry - SL (리스크 거리)
+                        # TP1 = Entry + r_tp1_mult * R, TP2 = Entry + r_tp2_mult * R
+                        risk_r = entry_price - sl
+                        tp1 = entry_price + (self.config.r_tp1_mult * risk_r)
+                        tp2 = entry_price + (self.config.r_tp2_mult * risk_r)
+                        tp3 = entry_price + (3.0 * risk_r)  # Runner용 3R
+                        print(f"  [R_BASED LONG] {current_time} - R=${risk_r:.0f} | TP1=${tp1:.0f}(+1R) | TP2=${tp2:.0f}(+2R)")
                     else:
                         # Fib TP: TP1 (두번째 L1), TP2 (세번째 L1), TP3 (네번째 L1) - 확장된 타겟
                         fib1 = get_next_l1_above(entry_price, self.config)
@@ -4281,11 +5263,62 @@ class StrategyA:
                             pending_long_signal = None
                             continue
 
+                    # === PR-FIB-SL-FIX: RR Min TP Gate (스킵 모드) ===
+                    # SL 조이기 대신 TP 도달 가능성으로 필터
+                    # tp_min = entry + risk * ratio, Fib 저항이 tp_min보다 낮으면 스킵
+                    if self.config.use_rr_min_tp_gate:
+                        risk = entry_price - sl  # LONG
+                        tp_min = entry_price + risk * self.config.rr_min_tp_ratio
+
+                        # 저항 = ZigZag swing high (Fib 레벨은 지지선이므로 저항으로 사용 안함)
+                        swing_high = None
+                        if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
+                            swing_high = dynfib_state.high
+
+                        # swing_high가 없거나 tp_min보다 낮으면 스킵
+                        if swing_high is None or swing_high < tp_min:
+                            rr_gate_rejects['RR_TP_GATE_LONG_UNREACHABLE'] = rr_gate_rejects.get('RR_TP_GATE_LONG_UNREACHABLE', 0) + 1
+                            swing_str = f"${swing_high:,.0f}" if swing_high else "None"
+                            print(f"  [LONG REJECTED] {current_time} - RR_TP_GATE: tp_min=${tp_min:,.0f} unreachable (swing_high={swing_str})")
+                            pending_long_signal = None
+                            continue
+
+                    # === MODE77: Max Risk Filter (과대 리스크 스킵) ===
+                    if self.config.use_max_risk_filter:
+                        risk = entry_price - sl  # LONG
+                        risk_pct = risk / entry_price * 100  # %
+                        risk_atr = risk / current_atr if current_atr > 0 else 999  # BUG FIX: current_atr 사용 (atr_tf_for_risk 기반)
+
+                        if risk_pct > self.config.max_risk_pct:
+                            rr_gate_rejects['MAX_RISK_PCT_LONG'] = rr_gate_rejects.get('MAX_RISK_PCT_LONG', 0) + 1
+                            print(f"  [LONG REJECTED] {current_time} - MAX_RISK_PCT: {risk_pct:.2f}% > {self.config.max_risk_pct}%")
+                            pending_long_signal = None
+                            continue
+
+                        if risk_atr > self.config.max_risk_atr_mult:
+                            rr_gate_rejects['MAX_RISK_ATR_LONG'] = rr_gate_rejects.get('MAX_RISK_ATR_LONG', 0) + 1
+                            print(f"  [LONG REJECTED] {current_time} - MAX_RISK_ATR: {risk_atr:.2f} > {self.config.max_risk_atr_mult}")
+                            pending_long_signal = None
+                            continue
+
                     # sl_mult 초기화 (non-limit-order path)
                     if self.cycle_dynamics and len(df_15m_slice) >= self.config.cycle_lookback:
                         sl_mult = cycle_result['dynamic_sl_mult'] if cycle_result and 'dynamic_sl_mult' in cycle_result else self.config.sl_atr_mult
                     else:
                         sl_mult = self.config.sl_atr_mult
+
+                    # === RR 강제 SL: TP 기준으로 SL 계산 ===
+                    # SL = entry - (TP - entry) / rr_enforced_ratio
+                    if self.config.use_rr_enforced_sl and tp1 != float('inf'):
+                        tp_ref_key = self.config.rr_tp_ref if hasattr(self.config, 'rr_tp_ref') else "tp1"
+                        tp_target = tp1 if tp_ref_key == "tp1" else tp2
+                        tp_distance = tp_target - entry_price
+                        rr_sl_distance = tp_distance / self.config.rr_enforced_ratio
+                        rr_enforced_sl = entry_price - rr_sl_distance
+                        # 더 가까운(더 위쪽) SL로 강제 (손실 제한)
+                        if rr_enforced_sl > sl:
+                            print(f"    [RR-ENFORCED SL] ${sl:,.0f} -> ${rr_enforced_sl:,.0f} (TP=${tp_target:,.0f}, RR={self.config.rr_enforced_ratio})")
+                            sl = rr_enforced_sl
 
                     # PR-MODE48: Invariant 체크 (SL < Entry < TP)
                     valid, reason = validate_trade_params('long', entry_price, sl, tp1, tp2, tp3)
@@ -4323,6 +5356,7 @@ class StrategyA:
                         'entry_price': entry_price,
                         'entry_time': current_time,
                         'sl': sl,
+                        'initial_sl': sl,  # BUG FIX: R 계산용 원본 SL 저장
                         'tp1': tp1,
                         'tp2': tp2,
                         'tp3': tp3,  # PR6.2: TP3 추가
@@ -4348,16 +5382,196 @@ class StrategyA:
                         'leverage': leverage_used,
                         'liq_price': liq_price,
                         'is_liq_mode': self.config.use_liq_as_stop,
+                        # Divergence type tracking
+                        'div_type': pending_long_signal.get('div_type', 'Unknown'),
+                        # GateFlip hysteresis counter
+                        'gateflip_count': 0,
                     }
                     pending_long_signal = None
 
             # Short 반등 확인: 음봉 (close < open)
             if pending_short_signal is not None and short_position is None:
-                is_bearish_candle = bar['close'] < bar['open']
-                bars_since_touch = (current_time - pending_short_signal['touched_time']).total_seconds() / 300
-                if bars_since_touch > 3:
-                    pending_short_signal = None  # 신호 만료
-                elif is_bearish_candle:
+                # === PR-ENTRY-RR2: RR Limit Entry 모드 (SHORT) ===
+                if self.config.use_rr_limit_entry:
+                    # TTL 계산 (duration → bars)
+                    ttl_bars = _duration_to_bars(self.config.rr_limit_ttl, self.config.anchor_tf)
+                    bars_since_touch = (current_time - pending_short_signal['touched_time']).total_seconds() / (
+                        {'5m': 300, '15m': 900, '1h': 3600, '4h': 14400}.get(self.config.anchor_tf, 900)
+                    )
+
+                    if bars_since_touch > ttl_bars:
+                        print(f"  [SHORT LIMIT EXPIRED] {current_time} - TTL {ttl_bars} bars exceeded")
+                        pending_short_signal = None  # 주문 만료
+                    else:
+                        # Limit fill 조건 체크 전에 entry_limit 계산 (아직 안했으면)
+                        if 'entry_limit' not in pending_short_signal:
+                            # SL/TP 미리 계산
+                            signal_atr = pending_short_signal['atr']
+                            signal_price = pending_short_signal['zone_price']
+                            sl_mult = self.config.sl_atr_mult
+
+                            # TP 후보 계산 (fib_rr 방식) - 다이버전스 가격 아래의 다음 Fib
+                            fib_candidates = []
+                            curr_p = signal_price
+                            for _ in range(self.config.fib_tp_candidates + 1):
+                                fib = get_next_l1_below(curr_p, self.config)
+                                if fib:
+                                    fib_candidates.append(fib.price)
+                                    curr_p = fib.price - 1
+                                else:
+                                    break
+                            fib_candidates = fib_candidates[1:] if len(fib_candidates) > 1 else fib_candidates
+                            temp_tp = fib_candidates[0] if fib_candidates else signal_price - (signal_atr * 3.0)
+
+                            # === PR-MODE61: RR 2:1 강제 진입가 계산 (SHORT) ===
+                            if self.config.rr_entry_mode == "fixed_rr":
+                                # 1. SL = 이전 Fib (다이버전스 가격 위)
+                                # Dynamic Fib 레벨 수집
+                                fib_levels = []
+                                if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
+                                    fib_levels = get_dynamic_fib_levels(
+                                        dynfib_state.low,
+                                        dynfib_state.high,
+                                        self.config.dynfib_ratios,
+                                        space=self.config.dynamic_fib_space,
+                                        direction=dynfib_state.direction
+                                    )
+                                # Macro Fib 추가 (Macro는 기본 방향 "up")
+                                if self.config.use_macro_fib:
+                                    macro_levels = get_dynamic_fib_levels(
+                                        self.config.fib_anchor_low,
+                                        self.config.fib_anchor_high,
+                                        self.config.dynfib_ratios,
+                                        space=self.config.fib_space,
+                                        direction="up"
+                                    )
+                                    fib_levels = list(set(fib_levels + macro_levels))
+
+                                # signal_price 위의 이전 Fib 찾기 (최소 0.5 ATR 이상 떨어진)
+                                min_sl_dist = signal_atr * 0.5  # SL은 최소 0.5 ATR 떨어져야 의미있음
+                                fib_levels_above = sorted([f for f in fib_levels if f > signal_price + min_sl_dist])
+
+                                if len(fib_levels_above) >= 1:
+                                    prev_fib = fib_levels_above[0]  # 가장 가까운 (but 최소 0.5 ATR 떨어진) Fib
+                                    # buffer = min(ATR, fib_gap의 30%) - SL을 prev_fib 위에 둠
+                                    fib_gap = prev_fib - signal_price if prev_fib else signal_atr
+                                    buffer = min(signal_atr * 0.3, fib_gap * 0.3) if fib_gap > 0 else signal_atr * 0.3
+                                    temp_sl = prev_fib + buffer
+                                else:
+                                    # Fallback: ATR 기반 (0.5 ATR 내에 Fib가 없으면)
+                                    temp_sl = signal_price + (signal_atr * self.config.fib_sl_fallback_mult)
+
+                                # 2. Entry = (TP + target_rr * SL) / (1 + target_rr) → 정확히 RR 2:1
+                                # SHORT: TP < Entry < SL
+                                target_rr = self.config.rr_limit_target
+                                # RR = (Entry - TP) / (SL - Entry)
+                                # Entry = (TP + target_rr * SL) / (1 + target_rr)
+                                entry_limit = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
+
+                                # 검증: Entry가 signal_price보다 낮으면 RR 불가능 → 스킵
+                                # (역산 결과가 현재가보다 낮으면 수학적으로 target RR 달성 불가)
+                                if entry_limit <= signal_price:
+                                    print(f"  [SHORT LIMIT SKIP] {current_time} - Entry ${entry_limit:,.0f} <= signal ${signal_price:,.0f} - RR impossible")
+                                    pending_short_signal = None
+                                    continue
+
+                                # Entry가 SL보다 높거나 같으면 (불가능한 주문) 스킵
+                                if entry_limit >= temp_sl:
+                                    print(f"  [SHORT LIMIT FAIL] {current_time} - Entry ${entry_limit:,.0f} >= SL ${temp_sl:,.0f}")
+                                    pending_short_signal = None
+                                    continue
+
+                                actual_rr = (entry_limit - temp_tp) / (temp_sl - entry_limit)
+                                print(f"  [SHORT LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}")
+
+                            else:
+                                # RR 2:1 보장 방식 (Micro SL 기반) - MODE78 SHORT
+                                # 1. Micro SL 계산 (1H swing_high + buffer)
+                                micro_sl = None
+                                if self.config.use_micro_sl and df_1h is not None:
+                                    df_micro = df_1h[df_1h.index <= current_time]
+                                    if len(df_micro) >= 10:
+                                        swing_high = get_micro_swing_high(df_micro, lookback=48)
+                                        if swing_high is not None and swing_high > signal_price:
+                                            micro_atr = get_micro_atr(df_micro) or signal_atr
+                                            sl_buffer = micro_atr * self.config.micro_sl_buffer_mult
+                                            micro_sl = swing_high + sl_buffer
+                                            # Max distance cap
+                                            max_sl = signal_price + (micro_atr * self.config.micro_sl_max_atr_dist)
+                                            if micro_sl > max_sl:
+                                                micro_sl = max_sl
+
+                                # Fallback: ATR 기반
+                                if micro_sl is None:
+                                    micro_sl = signal_price + (signal_atr * self.config.fib_sl_fallback_mult)
+                                temp_sl = micro_sl
+
+                                # 2. RR 2:1 보장 Entry 계산
+                                # SHORT: Entry = (TP + target_rr * SL) / (1 + target_rr)
+                                # (TP < Entry < SL 이므로 공식 동일)
+                                target_rr = self.config.rr_limit_target  # 2.0
+                                max_entry = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
+
+                                # 3. 검증 (SHORT: max_entry >= temp_sl 이면 불가)
+                                if max_entry >= temp_sl:
+                                    print(f"  [SHORT LIMIT SKIP] {current_time} - RR impossible: max_entry=${max_entry:,.0f} >= sl=${temp_sl:,.0f}")
+                                    pending_short_signal = None
+                                    continue
+
+                                # 4. Entry 결정
+                                if max_entry <= signal_price:
+                                    # signal_price가 이미 충분히 높음 → RR > 2.0
+                                    entry_limit = signal_price + 1  # 1틱 위
+                                else:
+                                    # max_entry가 signal_price보다 높음 → RR = 2.0
+                                    entry_limit = max_entry
+
+                                actual_rr = (entry_limit - temp_tp) / (temp_sl - entry_limit) if temp_sl > entry_limit else 0
+                                print(f"  [SHORT LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}, MicroSL")
+
+                            # 현재가에서 너무 멀면 skip
+                            dist_atr = (entry_limit - bar['close']) / signal_atr
+                            if dist_atr > self.config.rr_limit_max_atr_dist:
+                                print(f"  [SHORT LIMIT SKIP] {current_time} - Entry limit ${entry_limit:,.0f} is {dist_atr:.1f} ATR above (max={self.config.rr_limit_max_atr_dist})")
+                                pending_short_signal = None
+                                continue
+
+                            # pending_signal에 limit 정보 저장
+                            pending_short_signal['entry_limit'] = entry_limit
+                            pending_short_signal['pre_sl'] = temp_sl
+                            pending_short_signal['pre_tp'] = temp_tp
+
+                        # Limit fill 체크
+                        entry_limit = pending_short_signal['entry_limit']
+                        fill_on = self.config.rr_limit_fill_on
+
+                        if fill_on == "low" and bar['high'] >= entry_limit:
+                            # Fill! 진입 가격 = max(entry_limit, open) - SHORT용 보수적 모델
+                            fill_price = max(entry_limit, bar['open'])
+                            pending_short_signal['fill_price'] = fill_price
+                            is_limit_filled = True
+                        elif fill_on == "close" and bar['close'] >= entry_limit:
+                            pending_short_signal['fill_price'] = bar['close']
+                            is_limit_filled = True
+                        else:
+                            is_limit_filled = False
+
+                        if not is_limit_filled:
+                            continue  # 다음 bar 기다림
+
+                        # 이하 필터 체크 진행 (기존 로직)
+                        is_bearish_candle = True  # limit fill이면 음봉 조건 스킵
+
+                else:
+                    # === 기존: 음봉 기반 진입 ===
+                    is_bearish_candle = bar['close'] < bar['open']
+                    # 신호 유효기간 체크 (2봉 이내)
+                    bars_since_touch = (current_time - pending_short_signal['touched_time']).total_seconds() / 300
+                    if bars_since_touch > 3:
+                        pending_short_signal = None  # 신호 만료
+                        continue
+
+                if pending_short_signal is not None and (is_bearish_candle if not self.config.use_rr_limit_entry else True):
                     # === 추세 필터 체크 (Precomputed 컬럼 사용) ===
                     trend_1h = "UNKNOWN"
                     trend_4h = "UNKNOWN"
@@ -4443,23 +5657,54 @@ class StrategyA:
                         # 필터 없음: 항상 진입, 크기만 조절 (0.25 ~ 1.0)
                         size_mult *= depth_size_mult
 
-                    # 반등 확인! 시장가 진입
-                    entry_price = bar['close']
-                    atr = pending_short_signal['atr']
+                    # 반등 확인! 진입
+                    # PR-ENTRY-RR2: limit entry면 fill_price 사용
+                    if self.config.use_rr_limit_entry and 'fill_price' in pending_short_signal:
+                        entry_price = pending_short_signal['fill_price']
+                        atr = pending_short_signal['atr']
 
-                    # 동적 SL 배수 계산
-                    if self.cycle_dynamics and len(df_15m_slice) >= self.config.cycle_lookback:
-                        cycle_result = self.cycle_dynamics.analyze(close_arr_15m)
-                        sl_mult = cycle_result['dynamic_sl_mult']
+                        # PR-MODE61: fixed_rr 또는 offset_ratio+use_micro_sl 모드에서는 pre_sl 사용 (RR 2:1 보장을 위해 재계산 금지)
+                        use_pre_sl = 'pre_sl' in pending_short_signal and (
+                            self.config.rr_entry_mode == "fixed_rr" or
+                            (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
+                        )
+                        if use_pre_sl:
+                            sl = pending_short_signal['pre_sl']
+                            actual_rr = (entry_price - pending_short_signal.get('pre_tp', entry_price - atr * 2)) / (sl - entry_price) if sl > entry_price else 0
+                            print(f"  [SHORT LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (pre_sl locked, RR={actual_rr:.2f})")
+
+                            # pre_sl 사용 시 SL 재계산 스킵
+                            use_precomputed_sl = True
+                        else:
+                            use_precomputed_sl = False
+                            print(f"  [SHORT LIMIT FILLED] Entry=${entry_price:,.0f}")
                     else:
-                        sl_mult = self.config.sl_atr_mult
+                        # 시장가 진입
+                        entry_price = bar['close']
+                        atr = pending_short_signal['atr']
+                        use_precomputed_sl = False
 
-                    # ATR 기반 SL
-                    sl = entry_price + (atr * sl_mult)
+                    # 동적 SL 배수 계산 (use_precomputed_sl=False일 때만)
+                    if not use_precomputed_sl:
+                        if self.cycle_dynamics and len(df_15m_slice) >= self.config.cycle_lookback:
+                            cycle_result = self.cycle_dynamics.analyze(close_arr_15m)
+                            sl_mult = cycle_result['dynamic_sl_mult']
+                        else:
+                            sl_mult = self.config.sl_atr_mult
+
+                        # ATR 기반 SL
+                        sl = entry_price + (atr * sl_mult)
 
                     # PR4-R0: TP 모드에 따라 계산
                     fib_rr_rejected = False  # fib_rr 모드에서 RR 기준 미달 시 True
-                    if self.config.tp_mode == "atr":
+
+                    # RR limit entry fixed_rr 모드에서는 pre_tp 사용
+                    if use_precomputed_sl and 'pre_tp' in pending_short_signal:
+                        pre_tp = pending_short_signal['pre_tp']
+                        tp1 = pre_tp
+                        tp2 = pre_tp - (atr * 1.0)  # TP2: pre_tp 아래 1 ATR
+                        tp3 = pre_tp - (atr * 2.0)  # TP3: pre_tp 아래 2 ATR
+                    elif self.config.tp_mode == "atr":
                         # ATR 배수 기반 TP (RR 안정화)
                         tp_mults = self.config.tp_atr_mults
                         tp1 = entry_price - (atr * tp_mults[0])
@@ -4488,7 +5733,8 @@ class StrategyA:
                             dyn_levels = get_dynamic_fib_levels(
                                 dynfib_state.low, dynfib_state.high,
                                 self.config.dynfib_ratios,
-                                space=self.config.dynamic_fib_space
+                                space=self.config.dynamic_fib_space,
+                                direction=dynfib_state.direction
                             )
                             # entry_price 아래의 레벨만 TP 후보로 추가 (SHORT용)
                             dyn_below = [p for p in dyn_levels if p < entry_price]
@@ -4610,6 +5856,42 @@ class StrategyA:
                             pending_short_signal = None
                             continue
 
+                    # === PR-FIB-SL-FIX: RR Min TP Gate (스킵 모드) - SHORT ===
+                    if self.config.use_rr_min_tp_gate:
+                        risk = sl - entry_price  # SHORT
+                        tp_min = entry_price - risk * self.config.rr_min_tp_ratio
+
+                        # 지지 = ZigZag swing low (SHORT의 자연스러운 TP 목표)
+                        swing_low = None
+                        if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
+                            swing_low = dynfib_state.low
+
+                        # swing_low가 없거나 tp_min보다 높으면 스킵
+                        if swing_low is None or swing_low > tp_min:
+                            rr_gate_rejects['RR_TP_GATE_SHORT_UNREACHABLE'] = rr_gate_rejects.get('RR_TP_GATE_SHORT_UNREACHABLE', 0) + 1
+                            swing_str = f"${swing_low:,.0f}" if swing_low else "None"
+                            print(f"  [SHORT REJECTED] {current_time} - RR_TP_GATE: tp_min=${tp_min:,.0f} unreachable (swing_low={swing_str})")
+                            pending_short_signal = None
+                            continue
+
+                    # === MODE77: Max Risk Filter (과대 리스크 스킵) - SHORT ===
+                    if self.config.use_max_risk_filter:
+                        risk = sl - entry_price  # SHORT
+                        risk_pct = risk / entry_price * 100  # %
+                        risk_atr = risk / current_atr if current_atr > 0 else 999  # BUG FIX: current_atr 사용 (atr_tf_for_risk 기반)
+
+                        if risk_pct > self.config.max_risk_pct:
+                            rr_gate_rejects['MAX_RISK_PCT_SHORT'] = rr_gate_rejects.get('MAX_RISK_PCT_SHORT', 0) + 1
+                            print(f"  [SHORT REJECTED] {current_time} - MAX_RISK_PCT: {risk_pct:.2f}% > {self.config.max_risk_pct}%")
+                            pending_short_signal = None
+                            continue
+
+                        if risk_atr > self.config.max_risk_atr_mult:
+                            rr_gate_rejects['MAX_RISK_ATR_SHORT'] = rr_gate_rejects.get('MAX_RISK_ATR_SHORT', 0) + 1
+                            print(f"  [SHORT REJECTED] {current_time} - MAX_RISK_ATR: {risk_atr:.2f} > {self.config.max_risk_atr_mult}")
+                            pending_short_signal = None
+                            continue
+
                     # 모든 트레이드 로그 (디버그용)
                     print(f"  [SHORT ENTRY] {current_time}")
                     if self.config.use_liq_as_stop:
@@ -4631,6 +5913,7 @@ class StrategyA:
                         'entry_price': entry_price,
                         'entry_time': current_time,
                         'sl': sl,
+                        'initial_sl': sl,  # BUG FIX: R 계산용 원본 SL 저장
                         'tp1': tp1,
                         'tp2': tp2,
                         'tp3': tp3,  # PR6.2: TP3 추가
@@ -4656,6 +5939,10 @@ class StrategyA:
                         'leverage': leverage_used,
                         'liq_price': liq_price,
                         'is_liq_mode': self.config.use_liq_as_stop,
+                        # Divergence type tracking
+                        'div_type': pending_short_signal.get('div_type', 'Unknown'),
+                        # GateFlip hysteresis counter
+                        'gateflip_count': 0,
                     }
                     pending_short_signal = None
 
@@ -4677,7 +5964,7 @@ class StrategyA:
                         ref = find_swing_low_reference(df_15m_slice)
                         if ref:
                             long_price = needed_close_for_hidden_bullish(
-                                close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                                close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                             )
                             div_type = 'Hidden'
                     # BEAR/RANGE에서는 Long 스킵
@@ -4744,14 +6031,15 @@ class StrategyA:
                                 # Fib 레벨 근접 체크 (Macro + Dynamic Fib 통합)
                                 is_near, fib_level, fib_src = is_near_fib_level_combined(long_price, current_atr, self.config, dynfib_state)
                                 if is_near and fib_level:
+                                    div_type = "TrendContinuation"
                                     pending_long_signal = {
                                         'zone_price': long_price,
                                         'fib_level': fib_level,
                                         'atr': current_atr,
                                         'touched_time': current_time,
+                                        'div_type': div_type,
                                     }
                                     signal_tf = "15m_TrendCont"
-                                    div_type = "TrendContinuation"
                                     # 쿨다운 트래커 업데이트
                                     last_trend_cont_entry_bar_idx = i
                                     print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
@@ -4762,68 +6050,93 @@ class StrategyA:
 
                     elif long_signal_triggered or is_in_oversold:
                         # === 기존: 다이버전스 진입 (RANGE/DOWNTREND 또는 divergence 모드) ===
-                        # === 1) 15m 다이버전스 진입 시도 ===
-                        ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold)
-                        if ref:
-                            long_price = needed_close_for_regular_bullish(
-                                close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
-                            )
-
-                            # 15m 진입 시도
-                            if long_price and long_price > 0:
-                                is_near, fib_level, fib_src = is_near_fib_level_combined(long_price, current_atr, self.config, dynfib_state)
-                                if is_near and fib_level and bar['low'] <= long_price:
-                                    pending_long_signal = {
-                                        'zone_price': long_price,
-                                        'fib_level': fib_level,
-                                        'atr': current_atr,
-                                        'touched_time': current_time,
-                                    }
-                                    signal_tf = self.config.anchor_tf
-                                    print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
-                                    print(f"    Div Price: ${long_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
-                                    print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
-
-                        # === 2) 15m 실패 시 5m fallback (15m 세그먼트 → 5m REF) ===
-                        if pending_long_signal is None:
-                            ref_5m = find_oversold_reference_hybrid(df_15m_slice, df_5m_slice)
-                            if ref_5m:
-                                long_price_5m = needed_close_for_regular_bullish(
-                                    close_arr_5m, ref_5m['ref_price'], ref_5m['ref_rsi'], self.config.rsi_period
+                        # === 1) 15m Regular 다이버전스 진입 시도 ===
+                        if self.config.use_regular_div_long:
+                            # EXP-ENTRY-1: transition/not_oversold 모드면 과매도 탈출 직후에도 참조점 찾기
+                            is_transition_mode = (self.config.stoch_signal_mode in ["transition", "not_oversold"])
+                            ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold, transition_mode=is_transition_mode)
+                            if ref:
+                                signal_diag['find_ref_success'] += 1  # 진단
+                                long_price = needed_close_for_regular_bullish(
+                                    close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                                 )
 
-                                # 5m 진입 시도
-                                if long_price_5m and long_price_5m > 0:
-                                    is_near, fib_level, fib_src = is_near_fib_level_combined(long_price_5m, current_atr, self.config, dynfib_state)
-                                    if is_near and fib_level and bar['low'] <= long_price_5m:
-                                        pending_long_signal = {
-                                            'zone_price': long_price_5m,
-                                            'fib_level': fib_level,
-                                            'atr': current_atr,
-                                            'touched_time': current_time,
-                                        }
-                                        signal_tf = self.config.trigger_tf
-                                        print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
-                                        print(f"    Div Price: ${long_price_5m:,.0f} | Bar Low: ${bar['low']:,.0f}")
-                                        print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                # 15m 진입 시도
+                                if long_price and long_price > 0:
+                                    signal_diag['div_price_success'] += 1  # 진단
+                                    is_near, fib_level, fib_src = is_near_fib_level_combined(long_price, current_atr, self.config, dynfib_state)
+                                    # DEBUG: Fib Match 실패 원인 출력 (첫 5개만)
+                                    if not is_near and signal_diag['fib_match_fail'] < 5:
+                                        dyn_valid = dynfib_state.is_valid() if dynfib_state else False
+                                        dyn_low = dynfib_state.low if dynfib_state else 0
+                                        dyn_high = dynfib_state.high if dynfib_state else 0
+                                        print(f"  [DEBUG FIB FAIL] price=${long_price:,.0f} | dynfib_valid={dyn_valid} | low=${dyn_low:,.0f} | high=${dyn_high:,.0f}")
+                                    if is_near and fib_level:
+                                        signal_diag['fib_match_success'] += 1  # 진단
+                                        if bar['low'] <= long_price:
+                                            signal_diag['bar_low_touch_success'] += 1  # 진단
+                                            pending_long_signal = {
+                                                'zone_price': long_price,
+                                                'fib_level': fib_level,
+                                                'atr': current_atr,
+                                                'touched_time': current_time,
+                                                'div_type': div_type,
+                                            }
+                                            signal_tf = self.config.anchor_tf
+                                            print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
+                                            print(f"    Div Price: ${long_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
+                                            print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                        else:
+                                            signal_diag['bar_low_touch_fail'] += 1  # 진단
+                                    else:
+                                        signal_diag['fib_match_fail'] += 1  # 진단
+                                else:
+                                    signal_diag['div_price_fail'] += 1  # 진단
+                            else:
+                                signal_diag['find_ref_fail'] += 1  # 진단
 
-                        # === 3) Regular 실패 시 Hidden Bullish Divergence 시도 ===
+                            # === 2) 15m 실패 시 5m fallback (15m 세그먼트 → 5m REF) ===
+                            if pending_long_signal is None and self.config.use_5m_entry_fallback:
+                                ref_5m = find_oversold_reference_hybrid(df_15m_slice, df_5m_slice)
+                                if ref_5m:
+                                    long_price_5m = needed_close_for_regular_bullish(
+                                        close_arr_5m, ref_5m['ref_price'], ref_5m['ref_rsi'], self.config.rsi_period
+                                    )
+
+                                    # 5m 진입 시도
+                                    if long_price_5m and long_price_5m > 0:
+                                        is_near, fib_level, fib_src = is_near_fib_level_combined(long_price_5m, current_atr, self.config, dynfib_state)
+                                        if is_near and fib_level and bar['low'] <= long_price_5m:
+                                            pending_long_signal = {
+                                                'zone_price': long_price_5m,
+                                                'fib_level': fib_level,
+                                                'atr': current_atr,
+                                                'touched_time': current_time,
+                                                'div_type': div_type,
+                                            }
+                                            signal_tf = self.config.trigger_tf
+                                            print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
+                                            print(f"    Div Price: ${long_price_5m:,.0f} | Bar Low: ${bar['low']:,.0f}")
+                                            print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+
+                        # === 3) Hidden Bullish Divergence 시도 ===
                         if pending_long_signal is None and self.config.use_hidden_div_long:
                             ref_hidden = find_swing_low_reference(df_15m_slice)
                             if ref_hidden:
                                 hidden_price = needed_close_for_hidden_bullish(
-                                    close_arr_15m, ref_hidden['ref_price'], ref_hidden['ref_rsi'], self.config.rsi_period
+                                    close_arr_15m[:-1], ref_hidden['ref_price'], ref_hidden['ref_rsi'], self.config.rsi_period
                                 )
                                 if hidden_price and hidden_price > 0:
                                     is_near, fib_level, fib_src = is_near_fib_level_combined(hidden_price, current_atr, self.config, dynfib_state)
                                     if is_near and fib_level and bar['low'] <= hidden_price:
+                                        div_type = 'Hidden'
                                         pending_long_signal = {
                                             'zone_price': hidden_price,
                                             'fib_level': fib_level,
                                             'atr': current_atr,
                                             'touched_time': current_time,
+                                            'div_type': div_type,
                                         }
-                                        div_type = 'Hidden'
                                         signal_tf = self.config.anchor_tf
                                         print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
                                         print(f"    Div Price: ${hidden_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
@@ -4843,7 +6156,7 @@ class StrategyA:
                         ref = find_swing_high_reference(df_15m_slice)
                         if ref:
                             short_price = needed_close_for_hidden_bearish(
-                                close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                                close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                             )
                             div_type = 'Hidden'
                     # BULL/RANGE에서는 Short 스킵
@@ -4868,6 +6181,7 @@ class StrategyA:
                                         'fib_level': fib_level,
                                         'atr': current_atr,
                                         'touched_time': current_time,
+                                        'div_type': div_type,
                                     }
                                     signal_tf = self.config.anchor_tf
                                     print(f"  [SHORT SIGNAL] {current_time} ({signal_tf}, {div_type})")
@@ -4875,7 +6189,7 @@ class StrategyA:
                                     print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
 
                         # === 2) 15m 실패 시 5m fallback (15m 세그먼트 → 5m REF) ===
-                        if pending_short_signal is None:
+                        if pending_short_signal is None and self.config.use_5m_entry_fallback:
                             ref_5m = find_overbought_reference_hybrid(df_15m_slice, df_5m_slice)
                             if ref_5m:
                                 short_price_5m = needed_close_for_regular_bearish(
@@ -4891,6 +6205,7 @@ class StrategyA:
                                             'fib_level': fib_level,
                                             'atr': current_atr,
                                             'touched_time': current_time,
+                                            'div_type': div_type,
                                         }
                                         signal_tf = self.config.trigger_tf
                                         print(f"  [SHORT SIGNAL] {current_time} ({signal_tf}, {div_type})")
@@ -4928,6 +6243,23 @@ class StrategyA:
                 if count > 0:
                     print(f"    {reason}: {count} rejected")
 
+        # === 신호 생성 단계별 진단 출력 ===
+        print(f"\n  [Signal Generation Diagnostics]")
+        print(f"    Total 15m Bars: {signal_diag['total_15m_bars']}")
+        print(f"    StochRSI Oversold Triggers: {signal_diag['stoch_oversold_triggers']} ({100*signal_diag['stoch_oversold_triggers']/max(1,signal_diag['total_15m_bars']):.1f}%)")
+        print(f"    --- After StochRSI Trigger ---")
+        print(f"    find_oversold_ref Success: {signal_diag['find_ref_success']}")
+        print(f"    find_oversold_ref Fail: {signal_diag['find_ref_fail']}")
+        print(f"    --- After find_ref Success ---")
+        print(f"    Divergence Price Success: {signal_diag['div_price_success']}")
+        print(f"    Divergence Price Fail: {signal_diag['div_price_fail']}")
+        print(f"    --- After Div Price Success ---")
+        print(f"    Fib Match Success: {signal_diag['fib_match_success']}")
+        print(f"    Fib Match Fail: {signal_diag['fib_match_fail']}")
+        print(f"    --- After Fib Match Success ---")
+        print(f"    Bar Low Touch Success: {signal_diag['bar_low_touch_success']}")
+        print(f"    Bar Low Touch Fail: {signal_diag['bar_low_touch_fail']}")
+
         # ProbabilityGate v2 통계 출력
         total_gate_rejects = sum(prob_gate_rejects.values())
         print(f"\n  [ProbabilityGate v2 Stats]")
@@ -4957,6 +6289,143 @@ class StrategyA:
             for reason, count in rr_gate_rejects.items():
                 if count > 0:
                     print(f"    {reason}: {count} rejected")
+
+        # PR-SHADOW: Shadow Trade 시뮬레이션
+        if self.config.track_shadow_trades and shadow_trades:
+            print(f"\n{'='*70}")
+            print(f"Shadow Trade 분석 (ProbGate Reject된 시그널)")
+            print(f"{'='*70}")
+            print(f"\n  총 Shadow Trades: {len(shadow_trades)}건")
+
+            # 각 shadow trade 시뮬레이션
+            shadow_wins = 0
+            shadow_losses = 0
+            shadow_total_pnl = 0.0
+            shadow_results = []
+
+            for st in shadow_trades:
+                entry = st['entry']
+                sl = st['sl']
+                tp = st['tp'] if st['tp'] and np.isfinite(st['tp']) else None
+                ts = st['timestamp']
+                atr = st['atr']
+                direction = st['direction']
+
+                # 해당 시점 이후 5m 데이터에서 SL/TP 도달 여부 확인
+                future_mask = df_5m.index > ts
+                future_bars = df_5m[future_mask].head(288)  # 최대 24시간 (288 * 5min)
+
+                if len(future_bars) == 0:
+                    continue
+
+                result_pnl = 0.0
+                result_type = 'TIMEOUT'
+                bars_to_exit = len(future_bars)
+
+                for j, (bar_time, bar_data) in enumerate(future_bars.iterrows()):
+                    if direction == 'LONG':
+                        # SL 체크 (low <= sl)
+                        if bar_data['low'] <= sl:
+                            result_pnl = sl - entry  # 손실
+                            result_type = 'SL'
+                            bars_to_exit = j + 1
+                            break
+                        # TP 체크 (tp가 있고 high >= tp)
+                        if tp and bar_data['high'] >= tp:
+                            result_pnl = tp - entry  # 수익
+                            result_type = 'TP'
+                            bars_to_exit = j + 1
+                            break
+                        # Trailing 모드면 2 ATR 도달 시 수익
+                        if self.config.tp_mode == "trailing_only":
+                            mfe = bar_data['high'] - entry
+                            if mfe >= 2.0 * atr:
+                                result_pnl = mfe * 0.5  # 절반 수익 추정
+                                result_type = 'TRAILING'
+                                bars_to_exit = j + 1
+                                break
+                    else:  # SHORT
+                        if bar_data['high'] >= sl:
+                            result_pnl = entry - sl
+                            result_type = 'SL'
+                            bars_to_exit = j + 1
+                            break
+                        if tp and bar_data['low'] <= tp:
+                            result_pnl = entry - tp
+                            result_type = 'TP'
+                            bars_to_exit = j + 1
+                            break
+
+                # risk_usd 기준 PnL 계산
+                if self.config.use_risk_fixed_sizing:
+                    sl_distance = abs(entry - sl)
+                    if sl_distance > 0:
+                        qty = self.config.risk_usd_per_trade / sl_distance
+                        pnl_usd = result_pnl * qty
+                    else:
+                        pnl_usd = 0
+                else:
+                    pnl_usd = result_pnl / entry * 100  # % 기반
+
+                if result_type == 'SL':
+                    shadow_losses += 1
+                elif result_type in ('TP', 'TRAILING'):
+                    shadow_wins += 1
+
+                shadow_total_pnl += pnl_usd
+                shadow_results.append({
+                    'timestamp': ts,
+                    'entry': entry,
+                    'sl': sl,
+                    'result': result_type,
+                    'pnl_usd': pnl_usd,
+                    'bars': bars_to_exit,
+                    'reject_reason': st['reject_reason'],
+                    'p_bull': st['p_bull'],
+                })
+
+            # 결과 출력
+            total_shadow = shadow_wins + shadow_losses
+            if total_shadow > 0:
+                shadow_wr = shadow_wins / total_shadow * 100
+                shadow_avg_pnl = shadow_total_pnl / total_shadow
+
+                print(f"\n  [Shadow Trade 결과]")
+                print(f"    체결 가능: {total_shadow}건 (W:{shadow_wins}/L:{shadow_losses})")
+                print(f"    승률: {shadow_wr:.1f}%")
+                print(f"    가상 PnL: ${shadow_total_pnl:.2f}")
+                print(f"    평균 PnL: ${shadow_avg_pnl:.2f}/건")
+
+                # 실제 거래와 비교
+                actual_pnl = result.summary().get('total_pnl_usd', 0)
+                print(f"\n  [비교 분석]")
+                print(f"    실제 PnL: ${actual_pnl:.2f}")
+                print(f"    Shadow PnL: ${shadow_total_pnl:.2f}")
+
+                if shadow_total_pnl < 0:
+                    print(f"    => ProbGate가 ${abs(shadow_total_pnl):.2f} 손실 방지!")
+                else:
+                    print(f"    => ProbGate가 ${shadow_total_pnl:.2f} 수익 기회 놓침")
+
+                # reject reason별 분석
+                reason_stats = {}
+                for sr in shadow_results:
+                    r = sr['reject_reason']
+                    if r not in reason_stats:
+                        reason_stats[r] = {'count': 0, 'pnl': 0, 'wins': 0, 'losses': 0}
+                    reason_stats[r]['count'] += 1
+                    reason_stats[r]['pnl'] += sr['pnl_usd']
+                    if sr['result'] == 'SL':
+                        reason_stats[r]['losses'] += 1
+                    elif sr['result'] in ('TP', 'TRAILING'):
+                        reason_stats[r]['wins'] += 1
+
+                print(f"\n  [Reject Reason별 분석]")
+                for reason, stats in sorted(reason_stats.items(), key=lambda x: x[1]['pnl']):
+                    wr = stats['wins'] / (stats['wins'] + stats['losses']) * 100 if (stats['wins'] + stats['losses']) > 0 else 0
+                    print(f"    {reason}: {stats['count']}건, WR={wr:.1f}%, PnL=${stats['pnl']:.2f}")
+            else:
+                print(f"  체결 가능한 Shadow Trade 없음")
 
         return result
 
@@ -5036,6 +6505,7 @@ class StrategyA:
             pnl_pct=leveraged_pnl_pct,
             pnl_usd=pnl_usd,
             exit_reason=reason,
+            div_type=position.get('div_type', 'Unknown'),
             bars_held=bars_held,
             mfe=mfe,
             mae=mae,
@@ -5105,6 +6575,7 @@ class StrategyA:
             pnl_pct=pnl_pct,  # PR6: 두 경로 모두 pnl_pct 직접 사용
             pnl_usd=pnl_usd,
             exit_reason=reason,
+            div_type=position.get('div_type', 'Unknown'),
             bars_held=bars_held,
             mfe=mfe,
             mae=mae,
@@ -5187,9 +6658,9 @@ class StrategyB:
                 exit_price = None
                 exit_reason = None
 
-                # SL 체크
+                # SL 체크 (Gap 반영)
                 if bar['low'] <= long_position['sl']:
-                    exit_price = long_position['sl']
+                    exit_price = min(long_position['sl'], bar['open'])
                     exit_reason = 'SL'
                 # TP 체크 (다음 L1 레벨)
                 elif bar['high'] >= long_position['tp']:
@@ -5210,9 +6681,9 @@ class StrategyB:
                 exit_price = None
                 exit_reason = None
 
-                # SL 체크
+                # SL 체크 (Gap 반영)
                 if bar['high'] >= short_position['sl']:
-                    exit_price = short_position['sl']
+                    exit_price = max(short_position['sl'], bar['open'])
                     exit_reason = 'SL'
                 # TP 체크
                 elif bar['low'] <= short_position['tp']:
@@ -5268,6 +6739,10 @@ class StrategyB:
                         'clamped': qty_info['clamped'],
                         'notional': qty_info['notional'],
                         'cap_reason': qty_info['cap_reason'],
+                        # Divergence type tracking
+                        'div_type': pending_long_signal.get('div_type', 'Unknown'),
+                        # GateFlip hysteresis counter
+                        'gateflip_count': 0,
                     }
                     pending_long_signal = None
 
@@ -5291,13 +6766,27 @@ class StrategyB:
                             fib_levels = get_dynamic_fib_levels(
                                 dynfib_state.low, dynfib_state.high,
                                 self.config.dynfib_ratios,
-                                space=self.config.dynamic_fib_space
+                                space=self.config.dynamic_fib_space,
+                                direction=dynfib_state.direction
                             )
-                        sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
+                        hard_sl, sl_buffer, sl_fib_gap = calc_fib_based_sl(
                             entry_price, trigger_fib, atr, fib_levels,
-                            side="short", fallback_atr_mult=self.config.fib_sl_fallback_mult
+                            side="short", fallback_atr_mult=self.config.fib_sl_fallback_mult,
+                            buffer_ratio=self.config.fib_sl_buffer_ratio
                         )
-                        print(f"  [SHORT ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
+                        # PR-SLTP-REWORK: Soft SL 합성
+                        if self.config.use_soft_sl_15m:
+                            soft_sl, swing_ref, soft_buffer = calc_soft_sl_15m(
+                                "short", entry_price, df_15m_slice,
+                                len(df_15m_slice) - 1,
+                                self.config.soft_sl_swing_lookback,
+                                self.config.soft_sl_atr_k
+                            )
+                            sl, sl_source = compose_sl("short", hard_sl, soft_sl, entry_price)
+                            print(f"  [SHORT ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({sl_source}, hard=${hard_sl:,.0f}, soft=${soft_sl:,.0f})")
+                        else:
+                            sl = hard_sl
+                            print(f"  [SHORT ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (Fib-based, buffer=${sl_buffer:.0f}, gap=${sl_fib_gap:.0f})")
                     else:
                         # ATR 기반 SL
                         sl = entry_price + (atr * self.config.sl_atr_mult)
@@ -5320,6 +6809,10 @@ class StrategyB:
                         'clamped': qty_info['clamped'],
                         'notional': qty_info['notional'],
                         'cap_reason': qty_info['cap_reason'],
+                        # Divergence type tracking
+                        'div_type': pending_short_signal.get('div_type', 'Unknown'),
+                        # GateFlip hysteresis counter
+                        'gateflip_count': 0,
                     }
                     pending_short_signal = None
 
@@ -5330,7 +6823,9 @@ class StrategyB:
             # Long 신호 체크 - 바운더리 하단 극단에서만
             if long_position is None and pending_long_signal is None and long_cooldown == 0:
                 # 1) 15m 다이버전스 체크 (Regular + Hidden)
-                ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold)
+                # EXP-ENTRY-1: transition/not_oversold 모드면 과매도 탈출 직후에도 참조점 찾기
+                is_transition_mode = (self.config.stoch_signal_mode in ["transition", "not_oversold"])
+                ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold, transition_mode=is_transition_mode)
                 long_price = None
 
                 if ref:
@@ -5338,7 +6833,7 @@ class StrategyB:
                         close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                     )
                     hid_price = needed_close_for_hidden_bullish(
-                        close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                        close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                     )
                     candidates = [p for p in [reg_price, hid_price] if p and p > 0]
                     long_price = min(candidates) if candidates else None
@@ -5351,7 +6846,7 @@ class StrategyB:
                             close_arr_5m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                         )
                         hid_price = needed_close_for_hidden_bullish(
-                            close_arr_5m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                            close_arr_5m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                         )
                         candidates = [p for p in [reg_price, hid_price] if p and p > 0]
                         long_price = min(candidates) if candidates else None
@@ -5382,7 +6877,7 @@ class StrategyB:
                         close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                     )
                     hid_price = needed_close_for_hidden_bearish(
-                        close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                        close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                     )
                     candidates = [p for p in [reg_price, hid_price] if p and p > 0]
                     short_price = max(candidates) if candidates else None
@@ -5395,7 +6890,7 @@ class StrategyB:
                             close_arr_5m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                         )
                         hid_price = needed_close_for_hidden_bearish(
-                            close_arr_5m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                            close_arr_5m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                         )
                         candidates = [p for p in [reg_price, hid_price] if p and p > 0]
                         short_price = max(candidates) if candidates else None
@@ -5454,6 +6949,7 @@ class StrategyB:
             pnl_pct=leveraged_pnl_pct,
             pnl_usd=pnl_usd,
             exit_reason=reason,
+            div_type=position.get('div_type', 'Unknown'),
             # PR6.3: 사이징 로깅
             sl_distance_raw=position.get('sl_distance_raw', 0.0),
             sl_distance_atr=position.get('sl_distance_atr', 0.0),
@@ -5898,7 +7394,8 @@ def main():
 
     need_context_data = (config.use_trend_filter_1h or config.use_trend_filter_4h or
                          config.use_atr_vol_filter or config.use_hilbert_filter or
-                         config.use_regime_hidden_strategy or config.use_prob_gate)
+                         config.use_regime_hidden_strategy or config.use_prob_gate or
+                         config.use_micro_sl)  # MODE78: 1H swing SL 필요
 
     if need_context_data:
         df_context = load_data(config.context_tf, START, END, config)  # 1H
@@ -6095,6 +7592,36 @@ def main():
     print(f"  5m Divergence:  {total_div_5m:>3} ({total_div_5m/total_trades*100:.1f}%)")
     print(f"  15m Divergence: {total_div_15m:>3} ({total_div_15m/total_trades*100:.1f}%)")
     print(f"  EOD:            {total_eod:>3} ({total_eod/total_trades*100:.1f}%)")
+
+    # === Divergence Type (Regular/Hidden) 분석 ===
+    print(f"\n{'='*70}")
+    print("Divergence Type 분석 - Strategy A")
+    print("='*70")
+
+    div_type_stats = {}
+    for t in result_a.trades:
+        dt = t.div_type or 'Unknown'
+        if dt not in div_type_stats:
+            div_type_stats[dt] = {'count': 0, 'wins': 0, 'losses': 0, 'total_pnl': 0.0, 'win_pnls': [], 'loss_pnls': []}
+        div_type_stats[dt]['count'] += 1
+        div_type_stats[dt]['total_pnl'] += t.pnl_usd
+        if t.pnl_usd > 0:
+            div_type_stats[dt]['wins'] += 1
+            div_type_stats[dt]['win_pnls'].append(t.pnl_usd)
+        else:
+            div_type_stats[dt]['losses'] += 1
+            div_type_stats[dt]['loss_pnls'].append(t.pnl_usd)
+
+    print(f"\n{'Div Type':<18} {'Count':>6} {'W/L':>10} {'WinRate':>8} {'AvgWin':>10} {'AvgLoss':>10} {'RR':>6} {'EV':>10} {'Total':>12}")
+    print("-" * 100)
+    for dt in sorted(div_type_stats.keys()):
+        s = div_type_stats[dt]
+        wr = s['wins'] / s['count'] * 100 if s['count'] > 0 else 0
+        avg_win = sum(s['win_pnls']) / len(s['win_pnls']) if s['win_pnls'] else 0
+        avg_loss = abs(sum(s['loss_pnls']) / len(s['loss_pnls'])) if s['loss_pnls'] else 0
+        rr = avg_win / avg_loss if avg_loss > 0 else 0
+        ev = (wr/100 * avg_win) - ((1 - wr/100) * avg_loss) if s['count'] > 0 else 0
+        print(f"{dt:<18} {s['count']:>6} {s['wins']:>4}/{s['losses']:<4} {wr:>7.1f}% ${avg_win:>9.2f} ${avg_loss:>9.2f} {rr:>5.2f} ${ev:>9.2f} ${s['total_pnl']:>11.2f}")
 
     # === PR4: SL 트레이드 상세 분석 ===
     sl_trades = [t for t in result_a.trades if t.exit_reason == 'SL']
