@@ -16,6 +16,7 @@ from .stochrsi import (
     pick_oversold_segments,
     pick_oversold_segment_with_rule,
     extract_ref_from_segment,
+    extract_ref_lowest_close,
     RefPoint,
 )
 from .divergence import (
@@ -77,6 +78,7 @@ __all__ = [
     'pick_oversold_segments',
     'pick_oversold_segment_with_rule',
     'extract_ref_from_segment',
+    'extract_ref_lowest_close',
     'RefPoint',
 
     # Divergence

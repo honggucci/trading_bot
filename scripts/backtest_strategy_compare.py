@@ -47,6 +47,32 @@ except ImportError as e:
     FEATURE_STORE_AVAILABLE = False
     print(f"[WARN] FeatureStore not available: {e}")
 
+# MODE82: Multi-TF Regime Aggregator import
+try:
+    from src.regime.multi_tf_regime import (
+        MultiTFRegimeAggregator,
+        RegimeConfig as RegimeAggConfig,
+        RegimeState,
+    )
+    from src.regime.regime_strategy import (
+        get_regime_params,
+        get_stoch_rsi_threshold,
+        get_risk_mult,
+        check_entry_conditions,
+    )
+    REGIME_AGGREGATOR_AVAILABLE = True
+except ImportError as e:
+    REGIME_AGGREGATOR_AVAILABLE = False
+    print(f"[WARN] RegimeAggregator not available: {e}")
+
+# Divergence Break SL import
+try:
+    from src.anchor.divergence import price_where_div_breaks
+    DIV_BREAK_SL_AVAILABLE = True
+except ImportError as e:
+    DIV_BREAK_SL_AVAILABLE = False
+    print(f"[WARN] price_where_div_breaks not available: {e}")
+
 # =============================================================================
 # 설정
 # =============================================================================
@@ -251,10 +277,10 @@ class Config:
     stoch_rsi_oversold: float = 20.0       # 과매도 진입 임계값
     stoch_rsi_overbought: float = 80.0     # 과매수 진입 임계값
 
-    # === EXP-ENTRY-1: StochRSI 전환 조건 ===
-    # "state": 기존 - StochRSI <= 20이면 바로 시그널 (과매도 상태)
-    # "transition": 개선 - StochRSI가 20 아래에서 20 위로 복귀할 때만 (과매도 탈출)
-    stoch_signal_mode: str = "state"       # "state" | "transition" | "not_oversold"
+    # === StochRSI 시그널 모드 ===
+    # "state": 과매도 상태(StochK <= 20)일 때 시그널
+    # "not_oversold": 과매도가 아닐 때 시그널 (회복 후 진입)
+    stoch_signal_mode: str = "state"       # "state" | "not_oversold"
 
     # === PR4-R0: TP 모드 옵션 ===
     # "fib": 기존 Fib 레벨 기반 TP (RR 보장 안됨)
@@ -402,6 +428,15 @@ class Config:
     # ATR 기반 SL
     sl_atr_mult: float = 1.5          # SL = entry ± 1.5*ATR (bc3e19a 설정)
     atr_period: int = 14              # ATR 계산 기간 (bc3e19a: 14, atr_duration 미설정 시 사용)
+
+    # === Divergence Break SL (RR 2:1 자동 보장) ===
+    # SL = 다이버전스가 깨지는 가격 (RSI = ref_rsi)
+    # TP = Entry + 2 * (Entry - SL)
+    use_div_break_sl: bool = False    # Div Break SL 사용 여부
+    div_break_max_distance_pct: float = 10.0  # 최대 탐색 거리 (%)
+    div_break_min_distance_pct: float = 0.1   # 최소 R 거리 (%) - 이보다 작으면 스킵
+    div_break_buffer_pct: float = 0.1  # break price 아래 버퍼 (%)
+    min_div_strength_atr_mult: float = 1.0  # 최소 다이버전스 강도 (gap >= ATR * mult)
 
     # === PR-FIB-SL: Fib 구조 기반 SL ===
     # SL = prev_fib - buffer
@@ -584,6 +619,8 @@ class Config:
     use_5m_div_exit: bool = True          # True=기존 동작, False=비활성화
     # 5) 15m Div Exit: 15분봉 반대 다이버전스 시 전체 청산
     use_15m_div_exit: bool = False        # 15m 다이버전스 청산
+    # 6) Overbought Exit: StochRSI >= overbought면 청산 (Mean Reversion)
+    use_overbought_exit: bool = False     # 과매수 청산 (RR 2:1 무시)
 
     # PR3.6: HOT 구간 Early Exit 강화 (불확실성 높을 때 더 공격적으로 청산)
     use_hot_early_exit: bool = False      # HOT 구간 강화 Early Exit
@@ -632,6 +669,74 @@ class Config:
     use_regular_div_long: bool = True   # Regular Bullish Divergence 사용
     use_hidden_div_long: bool = False   # Hidden Bullish Divergence 사용
     use_5m_entry_fallback: bool = True  # 15m 실패 시 5m fallback 사용
+
+    # === MODE82: Multi-TF Regime Aggregator ===
+    # ZigZag(1H,15m) + ProbGate(5m) 합의 기반 레짐 분류
+    use_regime_aggregator: bool = False  # Multi-TF Regime Aggregator 사용
+
+    # 레짐 가중치: {"1h_zz": 0.45, "15m_zz": 0.25, "5m_pg": 0.30}
+    regime_weights: dict = field(default_factory=lambda: {
+        "1h_zz": 0.45,
+        "15m_zz": 0.25,
+        "5m_pg": 0.30
+    })
+
+    # ZigZag → Prior 변환: {"1h_up": 0.80, "1h_down": 0.20, ...}
+    zz_prior: dict = field(default_factory=lambda: {
+        "1h_up": 0.80,
+        "1h_down": 0.20,
+        "15m_up": 0.70,
+        "15m_down": 0.30,
+        "unknown": 0.50
+    })
+
+    # Hysteresis 임계값: {"bull_enter": 0.60, "bull_exit": 0.50, ...}
+    hysteresis: dict = field(default_factory=lambda: {
+        "bull_enter": 0.60,
+        "bull_exit": 0.50,
+        "bear_enter": 0.40,
+        "bear_exit": 0.50
+    })
+
+    # 레짐별 StochRSI 임계값: {"BULL": 20.0, "RANGE": 20.0, "BEAR": 20.0}
+    regime_stoch_rsi: dict = field(default_factory=lambda: {
+        "BULL": 20.0,
+        "RANGE": 20.0,
+        "BEAR": 20.0
+    })
+
+    # 레짐별 RSI 임계값 (BEAR에서 추가 조건): {"BEAR": 30.0}
+    regime_rsi_threshold: dict = field(default_factory=lambda: {
+        "BEAR": 30.0
+    })
+
+    # 레짐별 Reclaim 필요 여부: {"BULL": False, "RANGE": True, "BEAR": True}
+    regime_require_reclaim: dict = field(default_factory=lambda: {
+        "BULL": False,
+        "RANGE": True,
+        "BEAR": True
+    })
+
+    # 레짐별 TP 모드: {"BULL": "trailing", "RANGE": "quick_exit", "BEAR": "quick_exit"}
+    regime_tp_mode: dict = field(default_factory=lambda: {
+        "BULL": "trailing",
+        "RANGE": "quick_exit",
+        "BEAR": "quick_exit"
+    })
+
+    # 레짐별 TP 부분청산 비율: {"BULL": 0.50, "RANGE": 1.00, "BEAR": 1.00}
+    regime_tp_partial_pct: dict = field(default_factory=lambda: {
+        "BULL": 0.50,
+        "RANGE": 1.00,
+        "BEAR": 1.00
+    })
+
+    # 레짐별 리스크 배수: {"BULL": 1.0, "RANGE": 0.3, "BEAR": 0.3}
+    regime_risk_mult: dict = field(default_factory=lambda: {
+        "BULL": 1.0,
+        "RANGE": 0.3,
+        "BEAR": 0.3
+    })
 
     # === FeatureStore (P5) ===
     # Centralized feature computation with FAIL-CLOSED warmup validation
@@ -915,16 +1020,34 @@ def calc_rsi_wilder(close: np.ndarray, period: int = 14) -> np.ndarray:
     return talib.RSI(close, timeperiod=period)
 
 def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, d_period: int = 3) -> np.ndarray:
-    """StochRSI %D 계산 (talib 사용)"""
+    """
+    TradingView Identical StochRSI %K 계산
+
+    주의: talib.STOCHRSI는 TradingView와 다른 계산 방식을 사용함.
+    이 함수는 TradingView와 동일한 방식으로 StochRSI를 계산함:
+    1. RSI 계산 (Wilder's)
+    2. RSI에 Stochastic 변환 적용
+    3. %K = SMA(stoch, k_period)
+    """
     close = np.asarray(close, dtype=np.float64)
-    fastk, fastd = talib.STOCHRSI(
-        close,
-        timeperiod=period,
-        fastk_period=k_period,
-        fastd_period=d_period,
-        fastd_matype=0  # SMA
-    )
-    return fastd
+
+    # 1. RSI 계산
+    rsi = talib.RSI(close, timeperiod=period)
+
+    # 2. RSI에 Stochastic 변환 적용
+    import pandas as pd
+    rsi_s = pd.Series(rsi)
+    lo = rsi_s.rolling(period, min_periods=period).min()
+    hi = rsi_s.rolling(period, min_periods=period).max()
+
+    denom = (hi - lo).replace(0.0, np.nan)
+    stoch = (rsi_s - lo) / denom
+    stoch = stoch.clip(lower=0.0, upper=1.0).fillna(0.0)
+
+    # 3. %K = SMA of stoch
+    k = stoch.rolling(k_period, min_periods=k_period).mean() * 100.0
+
+    return k.to_numpy()
 
 def calc_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 21) -> np.ndarray:
     """ATR 계산 (talib 사용)"""
@@ -2076,19 +2199,23 @@ def needed_close_for_hidden_bearish(
 # =============================================================================
 # 참조점 찾기
 # =============================================================================
-def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: float = 20.0, transition_mode: bool = False) -> Optional[Dict]:
+def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: float = 20.0, ref_lookback_bars: int = 20) -> Optional[Dict]:
     """최근 oversold 구간의 저점
 
     Args:
-        df: OHLC + stoch_d + rsi DataFrame
+        df: OHLC + stoch_k + rsi DataFrame
         lookback: 참조 윈도우 크기
-        threshold: 과매도 임계값 (PR4-R0: 하드코딩 제거)
-        transition_mode: True면 과매도 탈출 직후에도 참조점 찾음 (EXP-ENTRY-1)
+        threshold: 과매도 임계값
+        ref_lookback_bars: 세그먼트 시작점에서 뒤로 볼 봉 수 (최저 Close 탐색 범위 확장)
+
+    Note:
+        State 모드: 직전봉이 과매도일 때만 전 세그먼트 사용
+        기준봉(REF) 선택 = 세그먼트 시작점 이전 구간까지 포함하여 최저 CLOSE 봉 선택
     """
     if len(df) < 10:
         return None
 
-    d = df['stoch_d'].values[-lookback:] if len(df) >= lookback else df['stoch_d'].values
+    d = df['stoch_k'].values[-lookback:] if len(df) >= lookback else df['stoch_k'].values
     close = df['close'].values[-lookback:] if len(df) >= lookback else df['close'].values
     rsi = df['rsi'].values[-lookback:] if len(df) >= lookback else df['rsi'].values
 
@@ -2111,42 +2238,33 @@ def find_oversold_reference(df: pd.DataFrame, lookback: int = 100, threshold: fl
     if not segments:
         return None
 
-    # === EXP-ENTRY-1: transition_mode 분기 ===
+    # State 모드: 직전봉이 과매도일 때만 전 세그먼트 사용
     if len(d) < 2:
         return None
 
     prev_oversold = np.isfinite(d[-2]) and d[-2] <= threshold
-
-    if transition_mode:
-        # Transition 모드: 과매도 탈출 직후 (d[-2] >= threshold)
-        # 가장 최근 완료된 과매도 세그먼트 사용
-        if len(segments) < 1:
-            return None  # 과매도 세그먼트가 없으면 참조점 없음
-        # 마지막 세그먼트가 방금 끝난 것인지 확인
-        last_seg = segments[-1]
-        # 세그먼트 끝이 d[-3] 이전이어야 (d[-2]는 이미 탈출한 봉)
-        if last_seg[1] >= n - 2:
-            # 세그먼트가 아직 진행 중이면 그 전 세그먼트 사용
-            if len(segments) < 2:
-                return None
-            seg = segments[-2]
-        else:
-            seg = last_seg
-    else:
-        # 기존 모드: 직전봉이 과매도일 때만 전 세그먼트 사용
-        if not prev_oversold:
-            return None  # 직전봉이 과매도 아니면 참조점 없음
-        if len(segments) < 2:
-            return None  # 전 세그먼트가 없으면 참조점 없음
-        seg = segments[-2]  # 전 세그먼트 (현재 세그먼트 제외)
+    if not prev_oversold:
+        return None  # 직전봉이 과매도 아니면 참조점 없음
+    if len(segments) < 2:
+        return None  # 전 세그먼트가 없으면 참조점 없음
+    seg = segments[-2]  # 전 세그먼트 (현재 세그먼트 제외)
 
     a, b = seg
-    seg_close = close[a:b+1]
-    seg_rsi = rsi[a:b+1]
 
-    min_idx = np.argmin(seg_close)
-    ref_price = float(seg_close[min_idx])
-    ref_rsi = float(seg_rsi[min_idx])
+    # === 사용자 산식: 세그먼트 시작점 전 구간까지 포함하여 최저 CLOSE 탐색 ===
+    # (기존: 세그먼트 내에서만 검색 → 변경: 세그먼트 시작 전 ref_lookback_bars 포함)
+    search_start = max(0, a - ref_lookback_bars)
+    search_end = b + 1
+
+    search_close = close[search_start:search_end]
+    search_rsi = rsi[search_start:search_end]
+
+    if len(search_close) == 0:
+        return None
+
+    min_idx = np.argmin(search_close)
+    ref_price = float(search_close[min_idx])
+    ref_rsi = float(search_rsi[min_idx])
 
     if not np.isfinite(ref_rsi):
         return None
@@ -2156,14 +2274,14 @@ def find_overbought_reference(df: pd.DataFrame, lookback: int = 100, threshold: 
     """최근 overbought 구간의 고점
 
     Args:
-        df: OHLC + stoch_d + rsi DataFrame
+        df: OHLC + stoch_k + rsi DataFrame
         lookback: 참조 윈도우 크기
         threshold: 과매수 임계값 (PR4-R0: 하드코딩 제거)
     """
     if len(df) < 10:
         return None
 
-    d = df['stoch_d'].values[-lookback:] if len(df) >= lookback else df['stoch_d'].values
+    d = df['stoch_k'].values[-lookback:] if len(df) >= lookback else df['stoch_k'].values
     close = df['close'].values[-lookback:] if len(df) >= lookback else df['close'].values
     rsi = df['rsi'].values[-lookback:] if len(df) >= lookback else df['rsi'].values
 
@@ -2450,7 +2568,7 @@ def find_oversold_reference_hybrid(
         return None
 
     # 15m StochRSI 세그먼트 찾기
-    d = df_15m['stoch_d'].values[-lookback:] if len(df_15m) >= lookback else df_15m['stoch_d'].values
+    d = df_15m['stoch_k'].values[-lookback:] if len(df_15m) >= lookback else df_15m['stoch_k'].values
     idx_15m = df_15m.index[-lookback:] if len(df_15m) >= lookback else df_15m.index
 
     n = len(d)
@@ -2523,7 +2641,7 @@ def find_overbought_reference_hybrid(
         return None
 
     # 15m StochRSI 세그먼트 찾기
-    d = df_15m['stoch_d'].values[-lookback:] if len(df_15m) >= lookback else df_15m['stoch_d'].values
+    d = df_15m['stoch_k'].values[-lookback:] if len(df_15m) >= lookback else df_15m['stoch_k'].values
     idx_15m = df_15m.index[-lookback:] if len(df_15m) >= lookback else df_15m.index
 
     n = len(d)
@@ -2603,14 +2721,13 @@ def _ensure_fib_cache(config: Config = None) -> str:
         if config is None:
             # Legacy 호환: 하드코딩된 값 사용
             _FIB_LEVELS_CACHE[key] = get_fractal_fib_levels(
-                (3120, 143360), max_depth=1, space="linear"
+                (3120, 143360), max_depth=1
             )
         else:
-            # Config 기반: space + anchor 사용
+            # Config 기반: anchor 사용 (space는 cycle_anchor에서 지원 안함)
             _FIB_LEVELS_CACHE[key] = get_fractal_fib_levels(
                 (config.fib_anchor_low, config.fib_anchor_high),
-                max_depth=config.fib_max_depth,
-                space=config.fib_space
+                max_depth=getattr(config, 'fib_max_depth', 1)
             )
         _FIB_LEVELS_CACHE[key].sort(key=lambda lvl: lvl.price)
 
@@ -3183,10 +3300,13 @@ def calc_fib_based_sl(
         # 4. fib_gap = entry_fib - prev_fib
         fib_gap = entry_fib - prev_fib
 
-        # 5. buffer = fib_gap × buffer_ratio (TF 미스매치 해결)
-        # 기존: min(atr, fib_gap) → 15m ATR이 항상 선택됨
-        # 수정: fib_gap * ratio → Fib 스케일과 비례
-        buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
+        # 5. buffer 계산
+        # buffer_ratio >= 1.0: 원본 MODE47 로직 (min(atr, fib_gap))
+        # buffer_ratio < 1.0: 새로운 방식 (fib_gap * ratio)
+        if buffer_ratio >= 1.0:
+            buffer = min(atr, fib_gap) if fib_gap > 0 else atr * 0.5
+        else:
+            buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
 
         # 6. SL = prev_fib - buffer
         sl = prev_fib - buffer
@@ -3223,8 +3343,11 @@ def calc_fib_based_sl(
         # 4. fib_gap = prev_fib - entry_fib
         fib_gap = prev_fib - entry_fib
 
-        # 5. buffer = fib_gap × buffer_ratio (TF 미스매치 해결)
-        buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
+        # 5. buffer 계산 (long과 동일 로직)
+        if buffer_ratio >= 1.0:
+            buffer = min(atr, fib_gap) if fib_gap > 0 else atr * 0.5
+        else:
+            buffer = fib_gap * buffer_ratio if fib_gap > 0 else atr * 0.5
 
         # 6. SL = prev_fib + buffer
         sl = prev_fib + buffer
@@ -3478,7 +3601,7 @@ def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.Dat
 
     # 인디케이터 (talib 사용)
     df['rsi'] = calc_rsi_wilder(df['close'].values, period=config.rsi_period)
-    df['stoch_d'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, d_period=3)
+    df['stoch_k'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, d_period=3)
     df['atr'] = calc_atr(df['high'].values, df['low'].values, df['close'].values, period=config.atr_period)
 
     return df
@@ -3643,6 +3766,8 @@ class StrategyA:
             'REGIME_LONG_DOWNTREND': 0,  # DOWNTREND에서 차단 (config.regime_long_downtrend=False)
         }
         atr_vol_size_cuts = 0
+        # StochRSI 재검증 통계 (진입 시점에 과매도 상태 아니면 거부)
+        stoch_recheck_rejects = 0
         # PR4-R5: RR Gate 통계
         rr_gate_rejects = {
             'RR_GATE_LONG_LOW_RR': 0,   # LONG 진입 RR 부족
@@ -3668,6 +3793,16 @@ class StrategyA:
             'prob_gate_reject': 0,              # ProbGate 거부
         }
 
+        # MODE82: 레짐 분포 통계
+        regime_stats = {
+            'BULL': 0,
+            'RANGE': 0,
+            'BEAR': 0,
+            'entries_in_bull': 0,
+            'entries_in_range': 0,
+            'entries_in_bear': 0,
+        }
+
         # PR-DYN-FIB: 동적 Fib 앵커 상태 초기화
         dynfib_state = None
         df_1w = None  # 1W ZigZag용 데이터
@@ -3688,6 +3823,56 @@ class StrategyA:
                 except Exception as e:
                     print(f"  [PR-DYN-FIB] WARNING: Failed to load 1W data: {e}")
                     df_1w = None
+
+        # === MODE82: Multi-TF Regime Aggregator 초기화 ===
+        regime_aggregator = None
+        zz_1h_state = None
+        zz_15m_state = None
+        df_1h_full = None  # 1H ZigZag warmup용 데이터
+        current_regime = "RANGE"  # 기본값
+
+        if self.config.use_regime_aggregator and REGIME_AGGREGATOR_AVAILABLE:
+            # Regime Aggregator Config 생성 (config에서 값 로드)
+            regime_agg_config = RegimeAggConfig(
+                weight_1h_zz=self.config.regime_weights.get("1h_zz", 0.45),
+                weight_15m_zz=self.config.regime_weights.get("15m_zz", 0.25),
+                weight_5m_pg=self.config.regime_weights.get("5m_pg", 0.30),
+                prior_1h_up=self.config.zz_prior.get("1h_up", 0.80),
+                prior_1h_down=self.config.zz_prior.get("1h_down", 0.20),
+                prior_15m_up=self.config.zz_prior.get("15m_up", 0.70),
+                prior_15m_down=self.config.zz_prior.get("15m_down", 0.30),
+                prior_unknown=self.config.zz_prior.get("unknown", 0.50),
+                bull_enter=self.config.hysteresis.get("bull_enter", 0.60),
+                bull_exit=self.config.hysteresis.get("bull_exit", 0.50),
+                bear_enter=self.config.hysteresis.get("bear_enter", 0.40),
+                bear_exit=self.config.hysteresis.get("bear_exit", 0.50),
+            )
+            regime_aggregator = MultiTFRegimeAggregator(regime_agg_config)
+
+            # ZigZag 상태 초기화 (1H, 15m)
+            zz_1h_state = create_initial_state(mode="zigzag")
+            zz_15m_state = create_initial_state(mode="zigzag")
+
+            # 1H 데이터 로드 (ZigZag warmup용 - 6개월)
+            if df_1h is not None and len(df_1h) > 0:
+                try:
+                    from datetime import timedelta
+                    fib_start = df_15m.index.min() - timedelta(days=180)
+                    start_date_1h = fib_start.strftime("%Y-%m-%d")
+                    end_date = df_15m.index.max().strftime("%Y-%m-%d")
+                    df_1h_full = load_data("1h", start_date_1h, end_date, self.config)
+                    print(f"  [MODE82] Regime Aggregator enabled")
+                    print(f"           Weights: 1H={regime_agg_config.weight_1h_zz}, "
+                          f"15m={regime_agg_config.weight_15m_zz}, 5m={regime_agg_config.weight_5m_pg}")
+                    print(f"           Loaded {len(df_1h_full)} 1H bars for ZigZag")
+                except Exception as e:
+                    print(f"  [MODE82] WARNING: Failed to load 1H data: {e}")
+                    df_1h_full = df_1h  # fallback to passed df_1h
+
+            # 레짐별 StochRSI 임계값 로그
+            print(f"           StochRSI thresholds: BULL={self.config.regime_stoch_rsi.get('BULL', 30)}, "
+                  f"RANGE={self.config.regime_stoch_rsi.get('RANGE', 10)}, "
+                  f"BEAR={self.config.regime_stoch_rsi.get('BEAR', 10)}")
 
         # Hilbert 레짐 계산 (1H, causal)
         hilbert_regimes = None
@@ -3736,42 +3921,97 @@ class StrategyA:
                 # iloc[-2] = 방금 확정된 15분봉 (예: 14:00 시점에서 13:45~14:00 봉)
                 signal_diag['total_15m_bars'] += 1  # 진단: 15m 바 카운트
 
+                # === MODE82: 레짐 계산 (15m 바 전환 시점에 업데이트) ===
+                if regime_aggregator is not None and df_1h_full is not None:
+                    # 1. 1H ZigZag direction 계산
+                    mask_1h = df_1h_full.index <= current_time
+                    zz_1h_direction = "unknown"
+                    if mask_1h.sum() >= 5:
+                        df_1h_slice_full = df_1h_full[mask_1h]
+                        i_1h = len(df_1h_slice_full) - 1
+                        atr_1h = df_1h_slice_full['atr'].iloc[-1] if 'atr' in df_1h_slice_full.columns else current_atr * 4
+                        if pd.isna(atr_1h) or not np.isfinite(atr_1h):
+                            atr_1h = current_atr * 4
+                        zz_1h_state = update_anchor_zigzag(
+                            df_1h_slice_full, i_1h, zz_1h_state, atr_1h,
+                            reversal_mult=1.5  # 1H reversal mult
+                        )
+                        zz_1h_direction = zz_1h_state.direction if zz_1h_state else "unknown"
+
+                    # 2. 15m ZigZag direction 계산
+                    zz_15m_direction = "unknown"
+                    if len(df_15m_slice) >= 5:
+                        i_15m = len(df_15m_slice) - 1
+                        atr_15m_zz = df_15m_slice['atr'].iloc[-1] if 'atr' in df_15m_slice.columns else current_atr
+                        if pd.isna(atr_15m_zz) or not np.isfinite(atr_15m_zz):
+                            atr_15m_zz = current_atr
+                        zz_15m_state = update_anchor_zigzag(
+                            df_15m_slice, i_15m, zz_15m_state, atr_15m_zz,
+                            reversal_mult=1.5  # 15m reversal mult
+                        )
+                        zz_15m_direction = zz_15m_state.direction if zz_15m_state else "unknown"
+
+                    # 3. 5m ProbGate p_bull (간단한 모멘텀 스코어로 대체)
+                    # 20-bar return을 sigmoid로 0~1 변환
+                    pg_5m_p_bull = 0.5
+                    pg_5m_T = 1.0
+                    # df_5m_slice가 아직 없으므로 df_5m[:i+1] 사용
+                    if i >= 20:
+                        returns_20 = (df_5m.iloc[i]['close'] / df_5m.iloc[i-20]['close']) - 1
+                        # sigmoid 변환: z-score 기반
+                        z = returns_20 / 0.02  # 2% 기준 정규화
+                        pg_5m_p_bull = 1.0 / (1.0 + np.exp(-z))
+
+                    # 4. 레짐 업데이트
+                    regime_state = regime_aggregator.update(
+                        zz_1h_direction=zz_1h_direction,
+                        zz_15m_direction=zz_15m_direction,
+                        pg_5m_p_bull=pg_5m_p_bull,
+                        pg_5m_T=pg_5m_T,
+                        timestamp=current_time
+                    )
+                    current_regime = regime_state.regime
+
+                    # 레짐 분포 카운트
+                    if current_regime in regime_stats:
+                        regime_stats[current_regime] += 1
+
                 if len(df_15m_slice) >= 2:
-                    prev_confirmed_stoch = df_15m_slice['stoch_d'].iloc[-2]
+                    prev_confirmed_stoch = df_15m_slice['stoch_k'].iloc[-2]
                     if not np.isfinite(prev_confirmed_stoch):
                         prev_confirmed_stoch = 50.0
                 else:
                     prev_confirmed_stoch = 50.0
 
-                # 과매도/과매수 임계값
-                oversold_thr = self.config.stoch_rsi_oversold
-                overbought_thr = self.config.stoch_rsi_overbought
+                # === MODE82: 레짐 기반 StochRSI 임계값 ===
+                if self.config.use_regime_aggregator and REGIME_AGGREGATOR_AVAILABLE:
+                    oversold_thr = self.config.regime_stoch_rsi.get(current_regime, 30.0)
+                    overbought_thr = self.config.stoch_rsi_overbought  # 숏은 고정값 유지
+                else:
+                    oversold_thr = self.config.stoch_rsi_oversold
+                    overbought_thr = self.config.stoch_rsi_overbought
 
-                # === EXP-ENTRY-1: StochRSI 시그널 모드 ===
-                if self.config.stoch_signal_mode == "transition":
-                    # 전환 모드: 과매도 아래에서 위로 복귀할 때만 시그널
-                    # prev_prev_stoch < oversold AND prev_stoch >= oversold
-                    if len(df_15m_slice) >= 3:
-                        prev_prev_stoch = df_15m_slice['stoch_d'].iloc[-3]
-                        if not np.isfinite(prev_prev_stoch):
-                            prev_prev_stoch = 50.0
-                        # LONG: 과매도 탈출 (이전 봉 < 20, 직전 봉 >= 20)
-                        long_signal_triggered = (prev_prev_stoch < oversold_thr) and (prev_confirmed_stoch >= oversold_thr)
-                        # SHORT: 과매수 탈출 (이전 봉 > 80, 직전 봉 <= 80)
-                        short_signal_triggered = (prev_prev_stoch > overbought_thr) and (prev_confirmed_stoch <= overbought_thr)
-                    else:
-                        long_signal_triggered = False
-                        short_signal_triggered = False
-                elif self.config.stoch_signal_mode == "not_oversold":
+                # === StochRSI 시그널 모드 ===
+                if self.config.stoch_signal_mode == "not_oversold":
                     # not_oversold 모드: 과매도가 아닐 때만 시그널 (회복 후 진입)
-                    # 직전봉 StochRSI > 20이면 LONG 허용
                     long_signal_triggered = (prev_confirmed_stoch > oversold_thr)
-                    # 직전봉 StochRSI < 80이면 SHORT 허용
                     short_signal_triggered = (prev_confirmed_stoch < overbought_thr)
                 else:
-                    # 상태 모드 (기본): 과매도 상태이면 시그널
+                    # state 모드 (기본): 과매도 상태(StochK <= 20)이면 시그널
                     long_signal_triggered = (prev_confirmed_stoch <= oversold_thr)
                     short_signal_triggered = (prev_confirmed_stoch >= overbought_thr)
+
+                # === MODE82: BEAR 레짐에서 추가 RSI 조건 ===
+                # BEAR 레짐이고 long_signal_triggered이면, RSI < 30 조건 추가 체크
+                if long_signal_triggered and current_regime == 'BEAR':
+                    bear_rsi_thr = self.config.regime_rsi_threshold.get('BEAR', 30.0)
+                    current_rsi = df_15m_slice['rsi'].iloc[-1] if 'rsi' in df_15m_slice.columns else 50.0
+                    if current_rsi >= bear_rsi_thr:
+                        long_signal_triggered = False
+                        if signal_diag.get('bear_rsi_reject') is None:
+                            signal_diag['bear_rsi_reject'] = 0
+                        signal_diag['bear_rsi_reject'] += 1
+                        # print(f"  [BEAR RSI REJECT] RSI={current_rsi:.1f} >= {bear_rsi_thr}")
 
                 # 진단: StochRSI 조건 만족 카운트
                 if long_signal_triggered:
@@ -4242,6 +4482,31 @@ class StrategyA:
                     result.equity_curve.append(equity)
                     long_cooldown = self.config.cooldown_bars
                     long_position = None
+                # 과매수 청산 (Mean Reversion 전략)
+                elif self.config.use_overbought_exit:
+                    # 직전 확정봉의 StochRSI 체크
+                    current_stoch = 50.0
+                    if len(df_15m_slice) >= 2 and 'stoch_k' in df_15m_slice.columns:
+                        current_stoch = df_15m_slice['stoch_k'].iloc[-2]
+                        if not np.isfinite(current_stoch):
+                            current_stoch = 50.0
+
+                    if current_stoch >= self.config.stoch_rsi_overbought:
+                        exit_price = bar['close']
+                        remaining = long_position.get('remaining', 1.0)
+                        trade = self._close_position_partial(long_position, exit_price, 'OB_EXIT', current_time, remaining)
+
+                        entry_price = long_position['entry_price']
+                        pnl_pct = (exit_price - entry_price) / entry_price * 100
+                        print(f"  [OVERBOUGHT EXIT] {current_time}")
+                        print(f"    StochRSI={current_stoch:.1f} >= {self.config.stoch_rsi_overbought}")
+                        print(f"    Entry=${entry_price:,.0f} | Exit=${exit_price:,.0f} | PnL={pnl_pct:.2f}% | ${trade.pnl_usd:.2f}")
+
+                        result.trades.append(trade)
+                        equity += trade.pnl_usd
+                        result.equity_curve.append(equity)
+                        long_cooldown = self.config.cooldown_bars
+                        long_position = None
                 # TP1 체크 (50% 청산 + SL→Breakeven)
                 elif not long_position.get('tp1_hit', False) and bar['high'] >= long_position['tp1']:
                     exit_price = long_position['tp1']
@@ -4537,6 +4802,35 @@ class StrategyA:
                         print(f"  [LONG LIMIT EXPIRED] {current_time} - TTL {ttl_bars} bars exceeded")
                         pending_long_signal = None  # 주문 만료
                     else:
+                        # === 즉시 진입 체크: 신호 바에서 이미 zone 터치된 경우 ===
+                        if pending_long_signal.get('zone_touched_at_signal') and 'entry_limit' not in pending_long_signal:
+                            # === StochRSI 재검증 (IMMEDIATE FILL 전) ===
+                            # 신호 바에서도 StochRSI가 과매도 상태인지 확인
+                            stoch_ok_for_fill = True
+                            if len(df_15m_slice) >= 1 and 'stoch_k' in df_15m_slice.columns:
+                                current_stoch_k = df_15m_slice['stoch_k'].iloc[-1]
+                                stoch_recheck_thr = self.config.stoch_rsi_oversold
+                                if current_regime == 'BEAR' and hasattr(self.config, 'regime_stoch_rsi'):
+                                    stoch_recheck_thr = self.config.regime_stoch_rsi.get('BEAR', 20.0)
+                                elif current_regime in ['BULL', 'RANGE'] and hasattr(self.config, 'regime_stoch_rsi'):
+                                    stoch_recheck_thr = self.config.regime_stoch_rsi.get(current_regime, 20.0)
+
+                                if current_stoch_k > stoch_recheck_thr:
+                                    stoch_ok_for_fill = False
+                                    stoch_recheck_rejects += 1
+                                    print(f"  [IMMEDIATE FILL REJECTED] {current_time} - StochRSI Recheck FAIL: {current_stoch_k:.1f} > {stoch_recheck_thr:.0f}")
+                                    pending_long_signal = None
+                                    continue
+
+                            if stoch_ok_for_fill:
+                                signal_price = pending_long_signal['zone_price']
+                                signal_atr = pending_long_signal['atr']
+                                # 즉시 진입: entry_limit = zone_price
+                                pending_long_signal['entry_limit'] = signal_price
+                                pending_long_signal['fill_price'] = signal_price  # 신호 바에서 zone_price에 fill
+                                is_limit_filled = True
+                                print(f"  [IMMEDIATE FILL] Zone touched at signal bar → Entry at zone_price=${signal_price:,.0f}")
+
                         # Limit fill 조건 체크 전에 entry_limit 계산 (아직 안했으면)
                         if 'entry_limit' not in pending_long_signal:
                             # SL/TP 미리 계산
@@ -4558,64 +4852,119 @@ class StrategyA:
                             temp_tp = fib_candidates[0] if fib_candidates else signal_price + (signal_atr * 3.0)
 
                             # === PR-MODE61: RR 2:1 강제 진입가 계산 ===
-                            if self.config.rr_entry_mode == "fixed_rr":
-                                # 1. SL = 이전 Fib (다이버전스 가격 아래)
-                                # Dynamic Fib 레벨 수집
-                                fib_levels = []
-                                if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
-                                    fib_levels = get_dynamic_fib_levels(
-                                        dynfib_state.low,
-                                        dynfib_state.high,
-                                        self.config.dynfib_ratios,
-                                        space=self.config.dynamic_fib_space,
-                                        direction=dynfib_state.direction
-                                    )
-                                # Macro Fib 추가 (Macro는 방향 없음 - 기본 "up")
-                                if self.config.use_macro_fib:
-                                    macro_levels = get_dynamic_fib_levels(
-                                        self.config.fib_anchor_low,
-                                        self.config.fib_anchor_high,
-                                        self.config.dynfib_ratios,
-                                        space=self.config.fib_space,
-                                        direction="up"
-                                    )
-                                    fib_levels = list(set(fib_levels + macro_levels))
+                            if self.config.rr_entry_mode == "offset_ratio":
+                                # === 원본 MODE47: offset_ratio 방식 ===
+                                # Entry = signal_price - (TP거리 × offset_ratio)
+                                tp_distance = temp_tp - signal_price
+                                if tp_distance <= 0:
+                                    print(f"  [LONG LIMIT FAIL] {current_time} - TP <= signal_price")
+                                    pending_long_signal = None
+                                    continue
 
-                                # signal_price 아래의 이전 Fib 찾기 (최소 0.5 ATR 이상 떨어진)
-                                min_sl_dist = signal_atr * 0.5  # SL은 최소 0.5 ATR 떨어져야 의미있음
-                                fib_levels_below = sorted([f for f in fib_levels if f < signal_price - min_sl_dist], reverse=True)
+                                entry_limit = signal_price - (tp_distance * self.config.entry_offset_ratio)
 
-                                if len(fib_levels_below) >= 1:
-                                    prev_fib = fib_levels_below[0]  # 가장 가까운 (but 최소 0.5 ATR 떨어진) Fib
-                                    # buffer = min(ATR, fib_gap의 30%) - SL을 prev_fib 아래에 둠
-                                    fib_gap = signal_price - prev_fib if prev_fib else signal_atr
-                                    buffer = min(signal_atr * 0.3, fib_gap * 0.3) if fib_gap > 0 else signal_atr * 0.3
-                                    temp_sl = prev_fib - buffer
+                                # 원본 MODE47: ATR 기반 SL (Fib SL은 fill 후에 적용)
+                                temp_sl = entry_limit - (signal_atr * sl_mult)
+
+                                # 현재가에서 너무 멀면 skip
+                                dist_atr = (bar['close'] - entry_limit) / signal_atr
+                                if dist_atr > self.config.rr_limit_max_atr_dist:
+                                    print(f"  [LONG LIMIT SKIP] {current_time} - Entry ${entry_limit:,.0f} is {dist_atr:.1f} ATR below (max={self.config.rr_limit_max_atr_dist})")
+                                    pending_long_signal = None
+                                    continue
+
+                                # RR 계산 및 로그
+                                actual_rr = (temp_tp - entry_limit) / (entry_limit - temp_sl) if entry_limit > temp_sl else 0
+                                print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}, OffsetRatio={self.config.entry_offset_ratio}")
+
+                            elif self.config.rr_entry_mode == "fixed_rr":
+                                # MODE82: DivBreak SL 우선 사용 - 단순 전진 계산
+                                # Entry = signal_price, SL = break_price, TP = Entry + 2R
+                                if self.config.use_div_break_sl and 'break_price' in pending_long_signal:
+                                    break_price = pending_long_signal['break_price']
+                                    div_type = pending_long_signal.get('div_type', 'Regular')
+                                    if break_price and break_price > 0:
+                                        # 단순 전진 계산: Entry = signal_price
+                                        entry_limit = signal_price
+                                        temp_sl = break_price * (1 - self.config.div_break_buffer_pct / 100)
+
+                                        # R = Entry - SL
+                                        R = entry_limit - temp_sl
+
+                                        # 최소 R 검증 (% 기반: div_break_min_distance_pct)
+                                        r_pct = (R / entry_limit) * 100 if entry_limit > 0 else 0
+                                        min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 0.5)
+                                        if R <= 0 or r_pct < min_dist_pct:
+                                            print(f"  [LONG LIMIT SKIP] {current_time} - R too small: ${R:,.0f} ({r_pct:.2f}%) < {min_dist_pct}%")
+                                            pending_long_signal = None
+                                            continue
+
+                                        # TP = Entry + target_rr * R (자동 RR 2:1)
+                                        target_rr = self.config.rr_limit_target
+                                        temp_tp = entry_limit + (target_rr * R)
+
+                                        actual_rr = (temp_tp - entry_limit) / R
+                                        print(f"  [LONG LIMIT ORDER] {current_time} DivBreak({div_type})")
+                                        print(f"    Entry=${entry_limit:,.0f} | SL=${temp_sl:,.0f} (break=${break_price:,.0f}) | TP=${temp_tp:,.0f}")
+                                        print(f"    R=${R:,.0f} ({R/entry_limit*100:.2f}%) | RR={actual_rr:.2f}")
+                                    else:
+                                        print(f"  [LONG LIMIT SKIP] {current_time} - No DivBreak SL available")
+                                        pending_long_signal = None
+                                        continue
                                 else:
-                                    # Fallback: ATR 기반 (0.5 ATR 내에 Fib가 없으면)
-                                    temp_sl = signal_price - (signal_atr * self.config.fib_sl_fallback_mult)
+                                    # 기존 Fib 기반 SL (use_div_break_sl=false일 때)
+                                    # 1. SL = 이전 Fib (다이버전스 가격 아래)
+                                    # Dynamic Fib 레벨 수집
+                                    fib_levels = []
+                                    if self.config.use_dynamic_fib and dynfib_state is not None and dynfib_state.is_valid():
+                                        fib_levels = get_dynamic_fib_levels(
+                                            dynfib_state.low,
+                                            dynfib_state.high,
+                                            self.config.dynfib_ratios,
+                                            space=self.config.dynamic_fib_space,
+                                            direction=dynfib_state.direction
+                                        )
+                                    # Macro Fib 추가 (Macro는 방향 없음 - 기본 "up")
+                                    if self.config.use_macro_fib:
+                                        macro_levels = get_dynamic_fib_levels(
+                                            self.config.fib_anchor_low,
+                                            self.config.fib_anchor_high,
+                                            self.config.dynfib_ratios,
+                                            space=self.config.fib_space,
+                                            direction="up"
+                                        )
+                                        fib_levels = list(set(fib_levels + macro_levels))
 
-                                # 2. Entry = (TP + 2*SL) / 3 → 정확히 RR 2:1
-                                target_rr = self.config.rr_limit_target
-                                # RR = (TP - Entry) / (Entry - SL)
-                                # Entry = (TP + target_rr * SL) / (1 + target_rr)
-                                entry_limit = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
+                                    # signal_price 아래의 이전 Fib 찾기 (최소 0.5 ATR 이상 떨어진)
+                                    min_sl_dist = signal_atr * 0.5  # SL은 최소 0.5 ATR 떨어져야 의미있음
+                                    fib_levels_below = sorted([f for f in fib_levels if f < signal_price - min_sl_dist], reverse=True)
 
-                                # 검증: Entry가 signal_price보다 높으면 RR 불가능 → 스킵
-                                # (역산 결과가 현재가보다 높으면 수학적으로 target RR 달성 불가)
-                                if entry_limit >= signal_price:
-                                    print(f"  [LONG LIMIT SKIP] {current_time} - Entry ${entry_limit:,.0f} >= signal ${signal_price:,.0f} - RR impossible")
-                                    pending_long_signal = None
-                                    continue
+                                    if len(fib_levels_below) >= 1:
+                                        prev_fib = fib_levels_below[0]  # 가장 가까운 (but 최소 0.5 ATR 떨어진) Fib
+                                        # buffer = min(ATR, fib_gap의 30%) - SL을 prev_fib 아래에 둠
+                                        fib_gap = signal_price - prev_fib if prev_fib else signal_atr
+                                        buffer = min(signal_atr * 0.3, fib_gap * 0.3) if fib_gap > 0 else signal_atr * 0.3
+                                        temp_sl = prev_fib - buffer
+                                    else:
+                                        # Fallback: ATR 기반 (0.5 ATR 내에 Fib가 없으면)
+                                        temp_sl = signal_price - (signal_atr * self.config.fib_sl_fallback_mult)
 
-                                # Entry가 SL보다 낮거나 같으면 (불가능한 주문) 스킵
-                                if entry_limit <= temp_sl:
-                                    print(f"  [LONG LIMIT FAIL] {current_time} - Entry ${entry_limit:,.0f} <= SL ${temp_sl:,.0f}")
-                                    pending_long_signal = None
-                                    continue
+                                    # 기존 역산 방식 (use_div_break_sl=false일 때만)
+                                    target_rr = self.config.rr_limit_target
+                                    entry_limit = (temp_tp + target_rr * temp_sl) / (1 + target_rr)
 
-                                actual_rr = (temp_tp - entry_limit) / (entry_limit - temp_sl)
-                                print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}")
+                                    if entry_limit >= signal_price:
+                                        print(f"  [LONG LIMIT SKIP] {current_time} - Entry ${entry_limit:,.0f} >= signal ${signal_price:,.0f} - RR impossible")
+                                        pending_long_signal = None
+                                        continue
+
+                                    if entry_limit <= temp_sl:
+                                        print(f"  [LONG LIMIT FAIL] {current_time} - Entry ${entry_limit:,.0f} <= SL ${temp_sl:,.0f}")
+                                        pending_long_signal = None
+                                        continue
+
+                                    actual_rr = (temp_tp - entry_limit) / (entry_limit - temp_sl)
+                                    print(f"  [LONG LIMIT ORDER] {current_time} - Entry=${entry_limit:,.0f}, SL=${temp_sl:,.0f}, TP=${temp_tp:,.0f}, RR={actual_rr:.2f}")
 
                             else:
                                 # RR 2:1 보장 방식 (Micro SL 기반) - MODE78
@@ -4874,6 +5223,26 @@ class StrategyA:
                         # 필터 없음: 항상 진입, 크기만 조절 (0.25 ~ 1.0)
                         size_mult *= depth_size_mult
 
+                    # === StochRSI 재검증: 진입 시점에 여전히 과매도인지 확인 ===
+                    # 신호 생성 후 StochRSI가 회복되면 진입 취소
+                    if pending_long_signal is not None and 'fill_price' in pending_long_signal:
+                        # 현재 15m StochRSI 확인 (iloc[-1] = 현재 확정봉, 진입 시점 기준)
+                        if len(df_15m_slice) >= 1 and 'stoch_k' in df_15m_slice.columns:
+                            current_stoch_k = df_15m_slice['stoch_k'].iloc[-1]
+
+                            # 레짐 기반 threshold 적용
+                            stoch_recheck_thr = self.config.stoch_rsi_oversold  # 기본 20.0
+                            if current_regime == 'BEAR' and hasattr(self.config, 'regime_stoch_rsi'):
+                                stoch_recheck_thr = self.config.regime_stoch_rsi.get('BEAR', 20.0)
+                            elif current_regime in ['BULL', 'RANGE'] and hasattr(self.config, 'regime_stoch_rsi'):
+                                stoch_recheck_thr = self.config.regime_stoch_rsi.get(current_regime, 20.0)
+
+                            if current_stoch_k > stoch_recheck_thr:
+                                stoch_recheck_rejects += 1
+                                print(f"  [LONG REJECTED] {current_time} - StochRSI Recheck FAIL: {current_stoch_k:.1f} > {stoch_recheck_thr:.0f}")
+                                pending_long_signal = None
+                                continue
+
                     # 반등 확인! 진입
                     # PR-ENTRY-RR2: limit entry면 fill_price 사용
                     if self.config.use_rr_limit_entry and 'fill_price' in pending_long_signal:
@@ -4881,7 +5250,8 @@ class StrategyA:
                         atr = pending_long_signal['atr']
 
                         # PR-MODE61: fixed_rr 또는 offset_ratio+use_micro_sl 모드에서는 pre_sl 사용 (RR 2:1 보장을 위해 재계산 금지)
-                        use_pre_sl = 'pre_sl' in pending_long_signal and (
+                        # 단, use_div_break_sl이 활성화되면 Div Break SL 우선 사용
+                        use_pre_sl = 'pre_sl' in pending_long_signal and not self.config.use_div_break_sl and (
                             self.config.rr_entry_mode == "fixed_rr" or
                             (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
                         )
@@ -4941,6 +5311,34 @@ class StrategyA:
                                 # Fallback: ATR 기반 SL
                                 sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
                                 print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (MicroSL fallback, no valid swing)")
+                        # === MODE82: Div Break SL (RR 2:1 자동 보장) ===
+                        # 신호 시점에 계산된 break_price 사용 (재계산 안 함!)
+                        elif self.config.use_div_break_sl and 'break_price' in pending_long_signal:
+                            break_price = pending_long_signal['break_price']
+                            div_type = pending_long_signal.get('div_type', 'Regular')
+                            div_break_success = False
+
+                            if break_price and break_price > 0:
+                                sl = break_price * (1 - self.config.div_break_buffer_pct / 100)
+                                if sl < entry_price:
+                                    r = entry_price - sl
+                                    min_r = atr * 0.1  # 0.5 ATR → 0.1 ATR로 완화
+                                    if r >= min_r:
+                                        tp_2r = entry_price + 2 * r
+                                        pending_long_signal['div_break_tp'] = tp_2r
+                                        print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({div_type}DivBreak)")
+                                        print(f"    Break=${break_price:,.0f} | R=${r:,.0f} | TP(2R)=${tp_2r:,.0f}")
+                                        div_break_success = True
+                                    else:
+                                        print(f"  [LONG LIMIT SKIP] {div_type}DivBreak R=${r:,.0f} < min_r=${min_r:,.0f} (0.1 ATR)")
+                                else:
+                                    print(f"  [LONG LIMIT SKIP] {div_type}DivBreak SL=${sl:,.0f} >= Entry=${entry_price:,.0f}")
+
+                            if not div_break_success:
+                                # MODE82: ATR fallback 제거 - 진입 거부
+                                print(f"  [LONG LIMIT REJECT] DivBreak 진입 실패 ({div_type}) - NO ATR fallback")
+                                pending_long_signal = None
+                                continue
                         # PR-FIB-SL: Fib 구조 기반 SL (기존 모드)
                         elif self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
                             trigger_fib = pending_long_signal['fib_level'].price
@@ -5029,6 +5427,27 @@ class StrategyA:
                             else:
                                 sl = entry_price - (micro_atr * self.config.micro_sl_max_atr_dist)
                                 print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (MicroSL fallback)")
+                        # === MODE82: Div Break SL (신호 시점 break_price 사용) ===
+                        elif self.config.use_div_break_sl and 'break_price' in pending_long_signal:
+                            break_price = pending_long_signal['break_price']
+                            div_type = pending_long_signal.get('div_type', 'Regular')
+                            div_break_success = False
+
+                            if break_price and break_price > 0:
+                                sl = break_price * (1 - self.config.div_break_buffer_pct / 100)
+                                if sl < entry_price:
+                                    r = entry_price - sl
+                                    tp_2r = entry_price + 2 * r
+                                    pending_long_signal['div_break_tp'] = tp_2r
+                                    print(f"  [LONG ENTRY] Entry=${entry_price:,.0f} | SL=${sl:,.0f} ({div_type}DivBreak)")
+                                    print(f"    Break=${break_price:,.0f} | R=${r:,.0f} | TP(2R)=${tp_2r:,.0f}")
+                                    div_break_success = True
+
+                            if not div_break_success:
+                                # MODE82: ATR fallback 제거 - 진입 거부
+                                print(f"  [LONG ENTRY REJECT] DivBreak 진입 실패 ({div_type})")
+                                pending_long_signal = None
+                                continue
                         # PR-FIB-SL: Fib 구조 기반 SL
                         elif self.config.use_fib_based_sl and 'fib_level' in pending_long_signal:
                             trigger_fib = pending_long_signal['fib_level'].price
@@ -5073,18 +5492,23 @@ class StrategyA:
                     # PR4-R0: TP 모드에 따라 계산
                     fib_rr_rejected = False  # fib_rr 모드에서 RR 기준 미달 시 True
 
+                    # === MODE82: Div Break TP (RR 2:1 자동) - 최우선 ===
+                    if 'div_break_tp' in pending_long_signal:
+                        tp_2r = pending_long_signal['div_break_tp']
+                        tp1 = tp_2r
+                        tp2 = float('inf')  # DivBreak 모드: 단일 TP 사용 (TP2/TP3 비활성화)
+                        tp3 = float('inf')
+                        print(f"  [LONG TP] DivBreak TP=${tp_2r:,.0f} (RR 2:1)")
+
                     # MODE78-FIX: RR limit entry에서 pre_tp 사용 (Entry와 Exit TP 일치 보장)
-                    use_pre_tp = self.config.use_rr_limit_entry and 'pre_tp' in pending_long_signal and (
+                    elif self.config.use_rr_limit_entry and 'pre_tp' in pending_long_signal and (
                         self.config.rr_entry_mode == "fixed_rr" or
                         (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
-                    )
-
-                    if use_pre_tp:
-                        # Entry 계산 시 사용한 pre_tp 그대로 사용 (RR 2:1 보장)
+                    ):
                         pre_tp = pending_long_signal['pre_tp']
                         tp1 = pre_tp
-                        tp2 = pre_tp + (atr * 1.0)  # TP2: pre_tp 위 1 ATR
-                        tp3 = pre_tp + (atr * 2.0)  # TP3: pre_tp 위 2 ATR
+                        tp2 = pre_tp + (atr * 1.0)
+                        tp3 = pre_tp + (atr * 2.0)
                         print(f"  [LONG TP] pre_tp=${pre_tp:,.0f} locked (Entry RR consistent)")
                     elif self.config.tp_mode == "atr":
                         # ATR 배수 기반 TP (RR 안정화)
@@ -5332,6 +5756,13 @@ class StrategyA:
 
                     # 모든 트레이드 로그 (디버그용)
                     print(f"  [LONG ENTRY] {current_time}")
+
+                    # MODE82: 레짐별 진입 카운트
+                    if self.config.use_regime_aggregator:
+                        entry_regime_key = f"entries_in_{current_regime.lower()}"
+                        if entry_regime_key in regime_stats:
+                            regime_stats[entry_regime_key] += 1
+                        print(f"    Regime: {current_regime} | StochRSI thr: {oversold_thr}")
 
                     # PR-RANGE-1 (D): RANGE 진입 시 쿨다운 트래커 업데이트
                     if current_drift_regime == 'RANGE':
@@ -5664,7 +6095,8 @@ class StrategyA:
                         atr = pending_short_signal['atr']
 
                         # PR-MODE61: fixed_rr 또는 offset_ratio+use_micro_sl 모드에서는 pre_sl 사용 (RR 2:1 보장을 위해 재계산 금지)
-                        use_pre_sl = 'pre_sl' in pending_short_signal and (
+                        # 단, use_div_break_sl이 활성화되면 Div Break SL 우선 사용
+                        use_pre_sl = 'pre_sl' in pending_short_signal and not self.config.use_div_break_sl and (
                             self.config.rr_entry_mode == "fixed_rr" or
                             (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
                         )
@@ -5961,7 +6393,9 @@ class StrategyA:
                     current_regime = get_current_hilbert_regime(hilbert_regimes, current_time, self.config.context_tf)
                     # BULL 레짐에서만 Hidden Bullish로 Long
                     if current_regime == 'BULL':
-                        ref = find_swing_low_reference(df_15m_slice)
+                        # BUG FIX: find_swing_low_reference() → find_oversold_reference()
+                        # 스윙 저점이 아닌 과매도 세그먼트 기준점 사용
+                        ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold)
                         if ref:
                             long_price = needed_close_for_hidden_bullish(
                                 close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
@@ -6052,13 +6486,15 @@ class StrategyA:
                         # === 기존: 다이버전스 진입 (RANGE/DOWNTREND 또는 divergence 모드) ===
                         # === 1) 15m Regular 다이버전스 진입 시도 ===
                         if self.config.use_regular_div_long:
-                            # EXP-ENTRY-1: transition/not_oversold 모드면 과매도 탈출 직후에도 참조점 찾기
-                            is_transition_mode = (self.config.stoch_signal_mode in ["transition", "not_oversold"])
-                            ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold, transition_mode=is_transition_mode)
+                            # ENTRY TIMING FIX: 직전 확정봉까지만 사용 (현재 봉 제외)
+                            df_15m_confirmed = df_15m_slice.iloc[:-1] if len(df_15m_slice) > 1 else df_15m_slice
+                            close_arr_confirmed = df_15m_confirmed['close'].values
+
+                            ref = find_oversold_reference(df_15m_confirmed, threshold=self.config.stoch_rsi_oversold)
                             if ref:
                                 signal_diag['find_ref_success'] += 1  # 진단
                                 long_price = needed_close_for_regular_bullish(
-                                    close_arr_15m, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
+                                    close_arr_confirmed, ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
                                 )
 
                                 # 15m 진입 시도
@@ -6073,21 +6509,169 @@ class StrategyA:
                                         print(f"  [DEBUG FIB FAIL] price=${long_price:,.0f} | dynfib_valid={dyn_valid} | low=${dyn_low:,.0f} | high=${dyn_high:,.0f}")
                                     if is_near and fib_level:
                                         signal_diag['fib_match_success'] += 1  # 진단
-                                        if bar['low'] <= long_price:
-                                            signal_diag['bar_low_touch_success'] += 1  # 진단
-                                            pending_long_signal = {
-                                                'zone_price': long_price,
-                                                'fib_level': fib_level,
-                                                'atr': current_atr,
-                                                'touched_time': current_time,
-                                                'div_type': div_type,
-                                            }
-                                            signal_tf = self.config.anchor_tf
-                                            print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
-                                            print(f"    Div Price: ${long_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
-                                            print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+
+                                        # MODE82: break_price 먼저 계산 (Zone 터치 전)
+                                        # ENTRY TIMING FIX: 확정봉 데이터로 break_price 계산
+                                        break_price_at_signal = None
+                                        if self.config.use_div_break_sl and DIV_BREAK_SL_AVAILABLE:
+                                            bp_result = price_where_div_breaks(
+                                                df_15m_confirmed, ref['ref_rsi'],
+                                                rsi_period=self.config.rsi_period,
+                                                max_distance_pct=self.config.div_break_max_distance_pct
+                                            )
+                                            if bp_result and bp_result.get('is_div_valid') and bp_result.get('break_price'):
+                                                break_price_at_signal = bp_result['break_price']
+                                                break_distance_pct = bp_result.get('distance_pct', 0)
+
+                                                # 필터: 최소 거리 체크 (R이 너무 작으면 스킵)
+                                                min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 1.0)
+                                                if break_distance_pct is not None and break_distance_pct < min_dist_pct:
+                                                    print(f"  [LONG SIGNAL SKIP] R too small: dist={break_distance_pct:.2f}% < min {min_dist_pct}%")
+                                                    continue
+
+                                                # 필터: break_price >= zone_price면 무의미한 신호 (Zone 도달 전에 다이버전스 깨짐)
+                                                if break_price_at_signal >= long_price:
+                                                    print(f"  [LONG SIGNAL SKIP] break >= zone (${break_price_at_signal:,.0f} >= ${long_price:,.0f})")
+                                                    continue
+                                                # 필터: 다이버전스 강도 (gap >= ATR * min_div_strength_atr_mult)
+                                                div_gap = long_price - break_price_at_signal
+                                                min_gap = current_atr * getattr(self.config, 'min_div_strength_atr_mult', 1.0)
+                                                if div_gap < min_gap:
+                                                    print(f"  [LONG SIGNAL SKIP] weak div: gap=${div_gap:,.0f} < ATR*{getattr(self.config, 'min_div_strength_atr_mult', 1.0)}=${min_gap:,.0f}")
+                                                    continue
+                                            else:
+                                                # DivBreak 계산 실패 → 신호 스킵
+                                                print(f"  [LONG SIGNAL SKIP] DivBreak 계산 실패 at signal time")
+                                                continue
+
+                                        # MODE82: use_div_break_sl일 때 즉시 진입
+                                        # - 다이버전스 감지 시점에 즉시 진입 (현재 close)
+                                        # - SL = break_price (다이버전스가 깨지는 가격)
+                                        # - TP = entry + 2 * (entry - SL) (RR 2:1)
+                                        if self.config.use_div_break_sl and break_price_at_signal:
+                                            # === 다이버전스 조건 체크 (CRITICAL FIX v3) ===
+                                            # Regular Bullish: Price LL (cur < ref) AND RSI HL (cur > ref)
+                                            # Hidden Bullish:  Price HL (cur > ref) AND RSI LL (cur < ref)
+                                            cur_price = bar['close']
+                                            cur_rsi = df_15m_slice['rsi'].iloc[-1] if 'rsi' in df_15m_slice.columns else np.nan
+
+                                            # Regular Divergence 체크
+                                            price_ll = cur_price < ref['ref_price']
+                                            rsi_hl = np.isfinite(cur_rsi) and cur_rsi > ref['ref_rsi']
+                                            regular_div = price_ll and rsi_hl
+
+                                            # Hidden Divergence 체크
+                                            price_hl = cur_price > ref['ref_price']
+                                            rsi_ll = np.isfinite(cur_rsi) and cur_rsi < ref['ref_rsi']
+                                            hidden_div = price_hl and rsi_ll
+
+                                            # Config에 따라 허용 여부 결정
+                                            use_regular = getattr(self.config, 'use_regular_div_long', True)
+                                            use_hidden = getattr(self.config, 'use_hidden_div_long', False)
+
+                                            div_condition_met = (regular_div and use_regular) or (hidden_div and use_hidden)
+                                            detected_div_type = "regular" if regular_div else ("hidden" if hidden_div else "none")
+
+                                            if not div_condition_met:
+                                                # 다이버전스 조건 불충족 → 스킵
+                                                signal_diag['div_price_fail'] += 1
+                                                print(f"  [DIV CONDITION FAIL] {current_time}")
+                                                print(f"    REF: price=${ref['ref_price']:,.2f}, RSI={ref['ref_rsi']:.2f}")
+                                                print(f"    CUR: price=${cur_price:,.2f}, RSI={cur_rsi:.2f}")
+                                                print(f"    Regular (Price LL + RSI HL): {regular_div} [enabled={use_regular}]")
+                                                print(f"    Hidden (Price HL + RSI LL): {hidden_div} [enabled={use_hidden}]")
+                                                continue
+
+                                            # 다이버전스 타입 업데이트
+                                            div_type = detected_div_type
+
+                                            # 다이버전스가 아직 유효한지 확인 (bar['low'] > break_price)
+                                            div_still_valid = bar['low'] > break_price_at_signal
+                                            if div_still_valid:
+                                                signal_diag['bar_low_touch_success'] += 1  # 진단
+
+                                                # ENTRY TIMING FIX: Zone 터치 시 즉시 진입 가격 계산
+                                                # bar['low'] <= long_price 체크 → 실제 체결 가격 = min(bar['open'], long_price)
+                                                zone_touched_now = bar['low'] <= long_price
+                                                if zone_touched_now:
+                                                    touch_entry_price = min(bar['open'], long_price)
+                                                else:
+                                                    touch_entry_price = long_price  # 아직 안 닿음 → long_price로 대기
+
+                                                pending_long_signal = {
+                                                    'zone_price': touch_entry_price,  # ENTRY TIMING FIX: 터치 가격으로 진입
+                                                    'fib_level': fib_level,
+                                                    'atr': current_atr,
+                                                    'touched_time': current_time,
+                                                    'div_type': div_type,
+                                                    'ref_rsi': ref['ref_rsi'],
+                                                    'ref_price': ref['ref_price'],
+                                                    'break_price': break_price_at_signal,
+                                                    'zone_touched_at_signal': zone_touched_now,  # 터치 여부에 따라
+                                                    'signal_bar_low': bar['low'],
+                                                    'entry_mode': 'immediate_fill' if zone_touched_now else 'limit_pending',
+                                                }
+                                                signal_tf = self.config.anchor_tf
+                                                fill_status = "[IMMEDIATE FILL]" if zone_touched_now else "[LIMIT PENDING]"
+                                                print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) {fill_status}")
+                                                print(f"    REF: price=${ref['ref_price']:,.0f}, RSI={ref['ref_rsi']:.2f}")
+                                                print(f"    CUR: price=${cur_price:,.0f}, RSI={cur_rsi:.2f}")
+                                                print(f"    Entry: ${touch_entry_price:,.0f} (touch) | SL: ${break_price_at_signal:,.0f} (break)")
+                                                print(f"    R: ${touch_entry_price - break_price_at_signal:,.0f} | TP (2R): ${touch_entry_price + 2*(touch_entry_price-break_price_at_signal):,.0f}")
+                                                print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                            else:
+                                                signal_diag['bar_low_touch_fail'] += 1
+                                                # DEBUG (commented out for production)
+                                                # print(f"  [DIV ALREADY BROKEN] {current_time}")
+                                                # print(f"    bar_low: ${bar['low']:,.0f} <= break_price: ${break_price_at_signal:,.0f}")
                                         else:
-                                            signal_diag['bar_low_touch_fail'] += 1  # 진단
+                                            # 기존 로직: Zone 터치 대기
+                                            zone_touched = bar['low'] <= long_price
+                                            div_still_valid = break_price_at_signal is None or bar['low'] > break_price_at_signal
+
+                                            # === 다이버전스 조건 체크 (CRITICAL FIX) ===
+                                            # Zone 진입 시에도 RSI Higher Low 조건 확인
+                                            cur_rsi_zone = df_15m_slice['rsi'].iloc[-1] if 'rsi' in df_15m_slice.columns else np.nan
+                                            # Zone price는 ref_price보다 낮으므로 Price LL은 자동 충족
+                                            rsi_hl_zone = np.isfinite(cur_rsi_zone) and cur_rsi_zone > ref['ref_rsi']
+
+                                            if zone_touched and div_still_valid and rsi_hl_zone:
+                                                signal_diag['bar_low_touch_success'] += 1  # 진단
+
+                                                # ENTRY TIMING FIX: Zone 터치 시 즉시 진입 가격 계산
+                                                touch_entry_price = min(bar['open'], long_price)
+
+                                                pending_long_signal = {
+                                                    'zone_price': touch_entry_price,  # ENTRY TIMING FIX: 터치 가격으로 진입
+                                                    'fib_level': fib_level,
+                                                    'atr': current_atr,
+                                                    'touched_time': current_time,
+                                                    'div_type': div_type,
+                                                    'ref_rsi': ref['ref_rsi'],  # Div Break SL용
+                                                    'ref_price': ref['ref_price'],
+                                                    'break_price': break_price_at_signal,  # 신호 시점에 계산된 break_price
+                                                    'zone_touched_at_signal': True,  # 신호 바에서 이미 zone 터치됨 → 즉시 진입
+                                                    'signal_bar_low': bar['low'],  # 디버그용
+                                                }
+                                                signal_tf = self.config.anchor_tf
+                                                print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [ZONE TOUCH]")
+                                                print(f"    Div Price: ${long_price:,.0f} | Entry: ${touch_entry_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
+                                                print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                                if break_price_at_signal:
+                                                    print(f"    Break Price: ${break_price_at_signal:,.0f} (at signal)")
+                                            elif zone_touched and div_still_valid and not rsi_hl_zone:
+                                                # Zone 터치 + 다이버전스 유효 but RSI HL 조건 미충족
+                                                signal_diag['bar_low_touch_fail'] += 1  # 진단
+                                                print(f"  [ZONE RSI HL FAIL] {current_time}")
+                                                print(f"    REF RSI={ref['ref_rsi']:.2f} | CUR RSI={cur_rsi_zone:.2f}")
+                                                print(f"    RSI HL ({cur_rsi_zone:.2f} > {ref['ref_rsi']:.2f}): {rsi_hl_zone}")
+                                            else:
+                                                signal_diag['bar_low_touch_fail'] += 1  # 진단
+                                                # DEBUG (commented out for production)
+                                                # bp_str = f"${break_price_at_signal:,.0f}" if break_price_at_signal else "None"
+                                                # print(f"  [BAR LOW TOUCH FAIL] {current_time}")
+                                                # print(f"    long_price: ${long_price:,.0f} | bar_low: ${bar['low']:,.0f} | zone_touched: {zone_touched}")
+                                                # print(f"    break_price: {bp_str} | div_still_valid: {div_still_valid}")
                                     else:
                                         signal_diag['fib_match_fail'] += 1  # 진단
                                 else:
@@ -6106,41 +6690,113 @@ class StrategyA:
                                     # 5m 진입 시도
                                     if long_price_5m and long_price_5m > 0:
                                         is_near, fib_level, fib_src = is_near_fib_level_combined(long_price_5m, current_atr, self.config, dynfib_state)
-                                        if is_near and fib_level and bar['low'] <= long_price_5m:
-                                            pending_long_signal = {
+                                        if is_near and fib_level:
+                                            # MODE82: break_price 먼저 계산 (Zone 터치 전)
+                                            break_price_at_signal = None
+                                            if self.config.use_div_break_sl and DIV_BREAK_SL_AVAILABLE:
+                                                # 5m은 15m slice 사용 (더 안정적)
+                                                bp_result = price_where_div_breaks(
+                                                    df_15m_slice, ref_5m['ref_rsi'],
+                                                    rsi_period=self.config.rsi_period,
+                                                    max_distance_pct=self.config.div_break_max_distance_pct
+                                                )
+                                                if bp_result and bp_result.get('is_div_valid') and bp_result.get('break_price'):
+                                                    break_price_at_signal = bp_result['break_price']
+                                                    # 필터: break_price >= zone_price면 무의미한 신호
+                                                    if break_price_at_signal >= long_price_5m:
+                                                        print(f"  [LONG SIGNAL SKIP] 5m break >= zone (${break_price_at_signal:,.0f} >= ${long_price_5m:,.0f})")
+                                                        continue
+                                                    # 필터: 다이버전스 강도 (gap >= ATR * min_div_strength_atr_mult)
+                                                    div_gap = long_price_5m - break_price_at_signal
+                                                    min_gap = current_atr * getattr(self.config, 'min_div_strength_atr_mult', 1.0)
+                                                    if div_gap < min_gap:
+                                                        print(f"  [LONG SIGNAL SKIP] 5m weak div: gap=${div_gap:,.0f} < ATR*{getattr(self.config, 'min_div_strength_atr_mult', 1.0)}=${min_gap:,.0f}")
+                                                        continue
+                                                else:
+                                                    print(f"  [LONG SIGNAL SKIP] 5m DivBreak 계산 실패")
+                                                    continue
+
+                                            # Zone 터치 + 다이버전스 유효성 체크
+                                            zone_touched = bar['low'] <= long_price_5m
+                                            div_still_valid = break_price_at_signal is None or bar['low'] > break_price_at_signal
+
+                                            if zone_touched and div_still_valid:
+                                                pending_long_signal = {
                                                 'zone_price': long_price_5m,
                                                 'fib_level': fib_level,
                                                 'atr': current_atr,
                                                 'touched_time': current_time,
                                                 'div_type': div_type,
+                                                'ref_rsi': ref_5m['ref_rsi'],  # Div Break SL용
+                                                'ref_price': ref_5m['ref_price'],
+                                                'break_price': break_price_at_signal,
+                                                'zone_touched_at_signal': True,  # 신호 바에서 이미 zone 터치됨
+                                                'signal_bar_low': bar['low'],
                                             }
                                             signal_tf = self.config.trigger_tf
                                             print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
-                                            print(f"    Div Price: ${long_price_5m:,.0f} | Bar Low: ${bar['low']:,.0f}")
+                                            print(f"    Div Price: ${long_price_5m:,.0f} | Bar Low: ${bar['low']:,.0f} (ZONE TOUCHED)")
                                             print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                            if break_price_at_signal:
+                                                print(f"    Break Price: ${break_price_at_signal:,.0f} (at signal)")
 
                         # === 3) Hidden Bullish Divergence 시도 ===
-                        if pending_long_signal is None and self.config.use_hidden_div_long:
-                            ref_hidden = find_swing_low_reference(df_15m_slice)
+                        # Hidden도 Regular와 동일한 레짐 기반 조건 적용 (BEAR: RSI < 30 포함)
+                        if pending_long_signal is None and self.config.use_hidden_div_long and long_signal_triggered:
+                            # BUG FIX: find_swing_low_reference() → find_oversold_reference()
+                            # 스윙 저점이 아닌 과매도 세그먼트 기준점 사용 (Regular와 동일)
+                            ref_hidden = find_oversold_reference(df_15m_confirmed, threshold=self.config.stoch_rsi_oversold)
                             if ref_hidden:
                                 hidden_price = needed_close_for_hidden_bullish(
                                     close_arr_15m[:-1], ref_hidden['ref_price'], ref_hidden['ref_rsi'], self.config.rsi_period
                                 )
                                 if hidden_price and hidden_price > 0:
-                                    is_near, fib_level, fib_src = is_near_fib_level_combined(hidden_price, current_atr, self.config, dynfib_state)
-                                    if is_near and fib_level and bar['low'] <= hidden_price:
-                                        div_type = 'Hidden'
-                                        pending_long_signal = {
-                                            'zone_price': hidden_price,
-                                            'fib_level': fib_level,
-                                            'atr': current_atr,
-                                            'touched_time': current_time,
-                                            'div_type': div_type,
-                                        }
-                                        signal_tf = self.config.anchor_tf
-                                        print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
-                                        print(f"    Div Price: ${hidden_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
-                                        print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                    # === BUG FIX: Hidden 조건 (RSI LL) 체크 추가 ===
+                                    # Hidden Bullish: Price HL (cur > ref) AND RSI LL (cur < ref)
+                                    cur_rsi_hidden = df_15m_slice['rsi'].iloc[-1] if 'rsi' in df_15m_slice.columns else np.nan
+                                    rsi_ll = np.isfinite(cur_rsi_hidden) and cur_rsi_hidden < ref_hidden['ref_rsi']
+
+                                    if not rsi_ll:
+                                        print(f"  [HIDDEN SKIP] RSI LL fail: cur={cur_rsi_hidden:.2f} >= ref={ref_hidden['ref_rsi']:.2f}")
+                                    else:
+                                        is_near, fib_level, fib_src = is_near_fib_level_combined(hidden_price, current_atr, self.config, dynfib_state)
+                                        if is_near and fib_level:
+                                            div_type = 'Hidden'
+                                            # Hidden: ref_price 기반 SL (이론대로)
+                                            # 다이버전스 깨지는 조건 = price <= ref_price (Higher Low 구조 붕괴)
+                                            buffer_pct = getattr(self.config, 'div_break_buffer_pct', 0.1) / 100.0
+                                            break_price_at_signal = ref_hidden['ref_price'] * (1 - buffer_pct)
+
+                                            # 최소 거리 필터 (R이 너무 작으면 스킵)
+                                            entry_price_estimate = hidden_price
+                                            break_distance_pct = (entry_price_estimate - break_price_at_signal) / entry_price_estimate * 100
+                                            min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 0.1)  # config 또는 0.1%
+
+                                            if break_distance_pct < min_dist_pct:
+                                                print(f"  [HIDDEN SKIP] R too small: dist={break_distance_pct:.2f}% < min {min_dist_pct}%")
+                                            else:
+                                                # Zone 터치 + SL 유효성 체크
+                                                zone_touched = bar['low'] <= hidden_price
+                                                div_still_valid = bar['low'] > break_price_at_signal
+
+                                                if zone_touched and div_still_valid:
+                                                    pending_long_signal = {
+                                                        'zone_price': hidden_price,
+                                                        'fib_level': fib_level,
+                                                        'atr': current_atr,
+                                                        'touched_time': current_time,
+                                                        'div_type': div_type,
+                                                        'ref_rsi': ref_hidden['ref_rsi'],
+                                                        'ref_price': ref_hidden['ref_price'],
+                                                        'break_price': break_price_at_signal,  # Hidden: ref_price 기반 SL
+                                                        'zone_touched_at_signal': True,
+                                                        'signal_bar_low': bar['low'],
+                                                    }
+                                                    signal_tf = self.config.anchor_tf
+                                                    print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
+                                                    print(f"    Div Price: ${hidden_price:,.0f} | Bar Low: ${bar['low']:,.0f} (ZONE TOUCHED)")
+                                                    print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
+                                                    print(f"    Break Price: ${break_price_at_signal:,.0f} (ref_price - {buffer_pct*100:.1f}%, dist={break_distance_pct:.2f}%)")
 
             # Short 신호 체크 (PR4-R2: enable_short=False면 스킵)
             if self.config.enable_short and short_position is None and pending_short_signal is None and short_cooldown == 0:
@@ -6153,7 +6809,9 @@ class StrategyA:
                     current_regime = get_current_hilbert_regime(hilbert_regimes, current_time, self.config.context_tf)
                     # BEAR 레짐에서만 Hidden Bearish로 Short
                     if current_regime == 'BEAR':
-                        ref = find_swing_high_reference(df_15m_slice)
+                        # BUG FIX: find_swing_high_reference() → find_overbought_reference()
+                        # 스윙 고점이 아닌 과매수 세그먼트 기준점 사용
+                        ref = find_overbought_reference(df_15m_slice, threshold=self.config.stoch_rsi_overbought)
                         if ref:
                             short_price = needed_close_for_hidden_bearish(
                                 close_arr_15m[:-1], ref['ref_price'], ref['ref_rsi'], self.config.rsi_period
@@ -6243,10 +6901,28 @@ class StrategyA:
                 if count > 0:
                     print(f"    {reason}: {count} rejected")
 
+        # === MODE82: 레짐 분포 통계 출력 ===
+        if self.config.use_regime_aggregator:
+            total_regime_bars = sum([regime_stats.get(r, 0) for r in ['BULL', 'RANGE', 'BEAR']])
+            if total_regime_bars > 0:
+                print(f"\n  [MODE82 Regime Distribution]")
+                for r in ['BULL', 'RANGE', 'BEAR']:
+                    cnt = regime_stats.get(r, 0)
+                    pct = 100 * cnt / total_regime_bars
+                    bar = "#" * int(pct / 2)
+                    print(f"    {r:6s}: {cnt:5d} ({pct:5.1f}%) {bar}")
+                print(f"\n  [MODE82 Entries by Regime]")
+                for r in ['BULL', 'RANGE', 'BEAR']:
+                    key = f"entries_in_{r.lower()}"
+                    cnt = regime_stats.get(key, 0)
+                    print(f"    {r:6s}: {cnt} entries")
+
         # === 신호 생성 단계별 진단 출력 ===
         print(f"\n  [Signal Generation Diagnostics]")
         print(f"    Total 15m Bars: {signal_diag['total_15m_bars']}")
         print(f"    StochRSI Oversold Triggers: {signal_diag['stoch_oversold_triggers']} ({100*signal_diag['stoch_oversold_triggers']/max(1,signal_diag['total_15m_bars']):.1f}%)")
+        if signal_diag.get('bear_rsi_reject', 0) > 0:
+            print(f"    BEAR RSI Rejects (RSI >= 30): {signal_diag['bear_rsi_reject']}")
         print(f"    --- After StochRSI Trigger ---")
         print(f"    find_oversold_ref Success: {signal_diag['find_ref_success']}")
         print(f"    find_oversold_ref Fail: {signal_diag['find_ref_fail']}")
@@ -6289,6 +6965,11 @@ class StrategyA:
             for reason, count in rr_gate_rejects.items():
                 if count > 0:
                     print(f"    {reason}: {count} rejected")
+
+        # StochRSI 재검증 통계 출력
+        if stoch_recheck_rejects > 0:
+            print(f"\n  [StochRSI Recheck Stats]")
+            print(f"    Entry-time StochRSI > threshold Rejects: {stoch_recheck_rejects}")
 
         # PR-SHADOW: Shadow Trade 시뮬레이션
         if self.config.track_shadow_trades and shadow_trades:
@@ -6823,9 +7504,7 @@ class StrategyB:
             # Long 신호 체크 - 바운더리 하단 극단에서만
             if long_position is None and pending_long_signal is None and long_cooldown == 0:
                 # 1) 15m 다이버전스 체크 (Regular + Hidden)
-                # EXP-ENTRY-1: transition/not_oversold 모드면 과매도 탈출 직후에도 참조점 찾기
-                is_transition_mode = (self.config.stoch_signal_mode in ["transition", "not_oversold"])
-                ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold, transition_mode=is_transition_mode)
+                ref = find_oversold_reference(df_15m_slice, threshold=self.config.stoch_rsi_oversold)
                 long_price = None
 
                 if ref:
@@ -7395,7 +8074,8 @@ def main():
     need_context_data = (config.use_trend_filter_1h or config.use_trend_filter_4h or
                          config.use_atr_vol_filter or config.use_hilbert_filter or
                          config.use_regime_hidden_strategy or config.use_prob_gate or
-                         config.use_micro_sl)  # MODE78: 1H swing SL 필요
+                         config.use_micro_sl or  # MODE78: 1H swing SL 필요
+                         config.use_regime_aggregator)  # MODE82: Regime Aggregator 필요
 
     if need_context_data:
         df_context = load_data(config.context_tf, START, END, config)  # 1H

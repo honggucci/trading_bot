@@ -240,3 +240,52 @@ def extract_ref_from_segment(
         price=float(df.at[idx_min, close_col]),
         rsi=float(df.at[idx_min, rsi_col]) if rsi_col in df.columns else np.nan,
     )
+
+
+def extract_ref_lowest_close(
+    df: pd.DataFrame,
+    segment: Tuple[int, int],
+    *,
+    close_col: str = 'close',
+    rsi_col: str = 'rsi',
+    lookback_bars: int = 20,
+) -> RefPoint:
+    """
+    과매도 세그먼트 시작 전 lookback 구간에서 최저 종가를 가진 봉의 정보 추출 (REF)
+
+    사용자 산식: "기준봉 = CLOSE가 가장 낮은 봉"
+    - 과매도 세그먼트 시작점 기준으로 lookback_bars 만큼 뒤로 가서 최저 Close 찾기
+    - StochD 값과 무관하게 순수 가격 기준
+
+    Args:
+        df: DataFrame
+        segment: (start_idx, end_idx) - 과매도 세그먼트
+        close_col: 종가 컬럼명
+        rsi_col: RSI 컬럼명
+        lookback_bars: 세그먼트 시작점에서 뒤로 볼 봉 수
+
+    Returns:
+        RefPoint (기준점 정보)
+    """
+    seg_start, seg_end = segment
+
+    # 탐색 범위: 세그먼트 시작점에서 lookback_bars 전 ~ 세그먼트 끝
+    search_start = max(0, seg_start - lookback_bars)
+    search_end = seg_end + 1
+
+    sub = df.iloc[search_start:search_end]
+
+    if len(sub) == 0:
+        # fallback: 기존 로직
+        return extract_ref_from_segment(df, segment, close_col=close_col, rsi_col=rsi_col)
+
+    # 최저 종가 봉 찾기 (StochD 무관)
+    idx_min = sub[close_col].idxmin()
+    iloc_min = df.index.get_loc(idx_min)
+
+    return RefPoint(
+        idx=iloc_min,
+        ts=idx_min,
+        price=float(df.at[idx_min, close_col]),
+        rsi=float(df.at[idx_min, rsi_col]) if rsi_col in df.columns else np.nan,
+    )

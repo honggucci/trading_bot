@@ -365,3 +365,130 @@ def feasible_range_for_hidden(
         return None
 
     return (min(valid_prices), max(valid_prices))
+
+
+# ============================================================
+# Divergence Break Price: SL 설정용
+# ============================================================
+
+def price_where_div_breaks(
+    df: pd.DataFrame,
+    ref_rsi: float,
+    *,
+    rsi_period: int = 14,
+    max_distance_pct: float = 10.0,
+    tol: float = 1e-6,
+    max_iter: int = 60,
+) -> Dict:
+    """
+    RSI 다이버전스가 깨지는 가격 계산 (SL용)
+
+    Regular Bullish Divergence: price < ref_price AND RSI > ref_rsi
+    깨지는 조건: RSI <= ref_rsi
+
+    이 함수는 현재 가격에서 아래로 내려갈 때,
+    RSI = ref_rsi가 되는 가격을 찾습니다.
+    이 가격 아래로 떨어지면 다이버전스가 무효화됩니다.
+
+    Args:
+        df: DataFrame with close column
+        ref_rsi: 기준점 RSI (이전 저점의 RSI)
+        rsi_period: RSI 기간
+        max_distance_pct: 최대 탐색 거리 (%)
+        tol: 수렴 허용 오차
+        max_iter: 최대 반복 횟수
+
+    Returns:
+        {
+            'break_price': 다이버전스가 깨지는 가격 (SL),
+            'current_price': 현재 가격,
+            'current_rsi': 현재 RSI,
+            'distance_pct': 현재가 → break_price 거리%,
+            'is_div_valid': 현재 다이버전스 유효 여부,
+        }
+    """
+    rsi_at = _rsi_at_price_factory(df, rsi_period=rsi_period)
+
+    current_price = float(df['close'].iloc[-1])
+    current_rsi = rsi_at(current_price)
+
+    # 현재 RSI가 이미 ref_rsi 이하면 다이버전스 무효
+    if current_rsi <= ref_rsi:
+        return {
+            'break_price': current_price,
+            'current_price': current_price,
+            'current_rsi': current_rsi,
+            'distance_pct': 0.0,
+            'is_div_valid': False,
+        }
+
+    # 탐색 범위: 현재 가격에서 아래로
+    U = current_price
+    L = current_price * (1 - max_distance_pct / 100.0)
+
+    # L에서도 RSI > ref_rsi면 break point가 탐색 범위 밖
+    if rsi_at(L) > ref_rsi:
+        return {
+            'break_price': None,
+            'current_price': current_price,
+            'current_rsi': current_rsi,
+            'distance_pct': None,
+            'is_div_valid': True,
+        }
+
+    # 이분 탐색: RSI = ref_rsi인 가격 찾기
+    for _ in range(max_iter):
+        if (U - L) < tol:
+            break
+        M = (L + U) / 2.0
+        if rsi_at(M) > ref_rsi:
+            U = M  # RSI가 높으면 더 낮은 가격으로
+        else:
+            L = M  # RSI가 낮으면 더 높은 가격으로
+
+    break_price = U
+    distance_pct = (current_price - break_price) / current_price * 100.0
+
+    return {
+        'break_price': break_price,
+        'current_price': current_price,
+        'current_rsi': current_rsi,
+        'distance_pct': distance_pct,
+        'is_div_valid': True,
+    }
+
+
+def validate_break_price(
+    df: pd.DataFrame,
+    break_price: float,
+    ref_rsi: float,
+    *,
+    rsi_period: int = 14,
+    tolerance: float = 0.5,
+) -> Dict:
+    """
+    Break price 검증
+
+    Args:
+        df: DataFrame with close column
+        break_price: 검증할 break price
+        ref_rsi: 기준 RSI
+        rsi_period: RSI 기간
+        tolerance: RSI 허용 오차
+
+    Returns:
+        {
+            'rsi_at_break': break price에서의 RSI,
+            'rsi_diff': ref_rsi와의 차이,
+            'is_valid': 유효 여부 (차이가 tolerance 이내),
+        }
+    """
+    rsi_at = _rsi_at_price_factory(df, rsi_period=rsi_period)
+    rsi_at_break = rsi_at(break_price)
+    rsi_diff = abs(rsi_at_break - ref_rsi)
+
+    return {
+        'rsi_at_break': rsi_at_break,
+        'rsi_diff': rsi_diff,
+        'is_valid': rsi_diff <= tolerance,
+    }
