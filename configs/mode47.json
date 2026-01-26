@@ -17,6 +17,7 @@
   "_comment_fib_sl_logic": "SL = prev_fib - buffer, buffer = min(ATR, fib_gap)",
   "use_fib_based_sl": true,
   "fib_sl_fallback_mult": 1.5,
+  "fib_sl_buffer_ratio": 1.0,
 
   "tp_mode": "fib_rr",
   "fib_tp_candidates": 4,

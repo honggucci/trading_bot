@@ -49,7 +49,7 @@
   "_comment_entry": "=== Entry: 레짐별 StochRSI 임계값 ===",
   "stoch_rsi_oversold": 20.0,
   "stoch_rsi_overbought": 70.0,
-  "stoch_rsi_period": 14,
+  "stoch_rsi_period": 26,
   "stoch_signal_mode": "state",
   "_comment_stoch_mode": "state = 과매도 상태(StochK <= 20)일 때 신호",
   "use_regular_div_long": true,
@@ -62,9 +62,9 @@
     "RANGE": 20.0,
     "BEAR": 20.0
   },
-  "_comment_bear_rsi": "BEAR에서는 추가로 RSI < 30 필요",
+  "_comment_bear_rsi": "BEAR RSI 조건 비활성화 (100 = 항상 통과)",
   "regime_rsi_threshold": {
-    "BEAR": 30.0
+    "BEAR": 100.0
   },
   "regime_require_reclaim": {
     "BULL": false,
@@ -80,20 +80,25 @@
   "rr_limit_price_ref": "close",
   "rr_limit_fill_on": "low",
 
-  "_comment_sl": "=== Divergence Break SL (RR 2:1 자동 보장) ===",
-  "_comment_min_dist": "min_distance_pct: 최소 R 거리 (%)",
+  "_comment_sl": "=== SL = 다이버전스가 깨지는 가격 ===",
+  "_comment_sl_regular": "Regular: RSI = ref_rsi 되는 가격 (이분탐색)",
+  "_comment_sl_hidden": "Hidden: ref_price (Higher Low 구조 붕괴)",
   "use_div_break_sl": true,
   "div_break_max_distance_pct": 10.0,
-  "div_break_min_distance_pct": 0.5,
-  "div_break_buffer_pct": 0.1,
+  "div_break_min_distance_pct": 0.0,
+  "div_break_buffer_pct": 0,
   "min_div_strength_atr_mult": 0.0,
   "use_fib_based_sl": false,
   "fib_sl_fallback_mult": 1.5,
   "fib_sl_buffer_ratio": 1.0,
 
-  "_comment_tp": "=== TP (DivBreak 우선, ATR fallback) ===",
+  "_comment_tp": "=== TP (2R 부분청산 활성화) ===",
   "tp_mode": "atr",
   "tp_atr_mults": [2.0, 3.0, 4.0],
+  "use_tp_min_partial": true,
+  "tp_min_r_mult": 2.0,
+  "tp_min_partial_pct": 0.5,
+  "_comment_tp_min": "2R 도달 시 50% 부분청산",
 
   "_comment_regime_tp": "=== 레짐별 TP 설정 (RANGE=BEAR 보수적) ===",
   "regime_tp_mode": {
