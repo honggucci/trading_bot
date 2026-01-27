@@ -194,6 +194,7 @@ TF_15M = TimeframeSpec.from_string('15m')
 TF_30M = TimeframeSpec.from_string('30m')
 TF_1H = TimeframeSpec.from_string('1h')
 TF_4H = TimeframeSpec.from_string('4h')
+TF_2H = TimeframeSpec.from_string('2h')
 TF_1D = TimeframeSpec.from_string('1d')
 TF_1W = TimeframeSpec.from_string('1w')
 
@@ -202,7 +203,7 @@ TF_1W = TimeframeSpec.from_string('1w')
 # Timeframe Hierarchy (for fallback logic)
 # ============================================================
 # Ordered from highest (1w) to lowest (1m)
-TF_HIERARCHY: list[str] = ['1w', '1d', '4h', '1h', '15m', '5m', '1m']
+TF_HIERARCHY: list[str] = ['1w', '1d', '4h', '2h', '1h', '15m', '5m', '1m']
 
 
 def get_lower_timeframe(tf: str) -> str | None:

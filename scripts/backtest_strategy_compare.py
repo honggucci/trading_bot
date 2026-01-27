@@ -220,6 +220,8 @@ def _floor_by_tf(ts: pd.Timestamp, timeframe: str) -> pd.Timestamp:
         return ts.floor('30min') - pd.Timedelta(minutes=30)
     elif tf_lower == '1h':
         return ts.floor('1h') - pd.Timedelta(hours=1)
+    elif tf_lower == '2h':
+        return ts.floor('2h') - pd.Timedelta(hours=2)
     elif tf_lower == '4h':
         return ts.floor('4h') - pd.Timedelta(hours=4)
     elif tf_lower == '1d':
@@ -269,7 +271,7 @@ class Config:
     tp_split_ratios: tuple = (0.5, 0.3, 0.2)  # TP1:50%, TP2:30%, TP3:20%
 
     # RSI 설정
-    rsi_period: int = 14
+    rsi_period: int = 26
     stoch_rsi_period: int = 26
 
     # === PR4-R0: StochRSI 임계값 파라미터화 ===
@@ -438,8 +440,11 @@ class Config:
     div_break_buffer_pct: float = 0.1  # break price 아래 버퍼 (%)
     min_div_strength_atr_mult: float = 1.0  # 최소 다이버전스 강도 (gap >= ATR * mult)
     # === Divergence Mid-Price Entry ===
-    use_div_mid_entry: bool = False   # 중앙값 지정가 진입 사용 여부
-    div_sl_atr_buffer_mult: float = 1.0  # SL ATR 버퍼 배수
+    use_div_mid_entry: bool = False       # 중앙값 지정가 진입 사용 여부
+    div_mid_sl_atr_mult: float = 1.0     # SL = mid_entry - N×ATR
+    div_mid_tp1_atr_mult: float = 1.0    # TP1 = mid_entry + N×ATR (부분청산)
+    div_mid_tp1_partial_pct: float = 0.5  # TP1 도달 시 부분청산 비율
+    div_mid_trail_atr_mult: float = 1.0  # Runner trailing distance (ATR 배수)
 
     # === PR-FIB-SL: Fib 구조 기반 SL ===
     # SL = prev_fib - buffer
@@ -3598,8 +3603,8 @@ def simulate_limit_fill(
 # =============================================================================
 # 데이터 로딩
 # =============================================================================
-def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.DataFrame:
-    """데이터 로딩 및 인디케이터 계산"""
+def _load_raw_ohlcv(tf: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Raw OHLCV 데이터 로딩 (인디케이터 미포함)"""
     data_dir = ROOT / "data" / "bronze" / "binance" / "futures" / "BTC-USDT" / tf
 
     if not data_dir.exists():
@@ -3619,7 +3624,6 @@ def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.Dat
         df['datetime'] = pd.to_datetime(df['datetime'])
         df = df.set_index('datetime')
     elif 'timestamp' in df.columns:
-        # Handle both int64 (ms) and Timestamp formats
         if pd.api.types.is_integer_dtype(df['timestamp']):
             df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
         else:
@@ -3628,10 +3632,52 @@ def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.Dat
 
     df = df.sort_index()
     df = df[start_date:end_date]
+    return df
+
+
+def _resample_ohlcv(df: pd.DataFrame, target_tf: str) -> pd.DataFrame:
+    """OHLCV 데이터를 상위 TF로 리샘플링 (1h→2h 등)"""
+    from src.utils.timeframe import TIMEFRAME_MINUTES
+    minutes = TIMEFRAME_MINUTES.get(target_tf)
+    if minutes is None:
+        raise ValueError(f"Unknown target_tf for resample: {target_tf}")
+
+    rule = f'{minutes}min'
+    resampled = df.resample(rule).agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+    })
+    # volume이 있으면 합산
+    if 'volume' in df.columns:
+        resampled['volume'] = df['volume'].resample(rule).sum()
+
+    resampled = resampled.dropna(subset=['open', 'close'])
+    return resampled
+
+
+# 리샘플링이 필요한 TF → 소스 TF 매핑
+_RESAMPLE_SOURCE: dict = {
+    '2h': '1h',
+}
+
+
+def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.DataFrame:
+    """데이터 로딩 및 인디케이터 계산. 2h 등 데이터 미존재 TF는 자동 리샘플링."""
+    source_tf = _RESAMPLE_SOURCE.get(tf)
+    if source_tf:
+        # 리샘플링: 소스 TF 로드 → 타겟 TF로 변환
+        # 인디케이터 계산을 위해 충분한 warmup 데이터 포함
+        df = _load_raw_ohlcv(source_tf, start_date, end_date)
+        df = _resample_ohlcv(df, tf)
+        print(f"  [Resample] {source_tf} → {tf}: {len(df)} bars")
+    else:
+        df = _load_raw_ohlcv(tf, start_date, end_date)
 
     # 인디케이터 (talib 사용)
-    df['rsi'] = calc_rsi_wilder(df['close'].values, period=config.rsi_period)
-    df['stoch_k'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, d_period=3, rsi_period=config.rsi_period)
+    df['rsi'] = calc_rsi_wilder(df['close'].values, period=14)
+    df['stoch_k'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, d_period=3, rsi_period=14)
     df['atr'] = calc_atr(df['high'].values, df['low'].values, df['close'].values, period=config.atr_period)
 
     return df
@@ -4124,6 +4170,35 @@ class StrategyA:
                 if bars_held <= 6:
                     long_position['mfe_first_6'] = max(long_position.get('mfe_first_6', long_position['entry_price']), bar['high'])
                     long_position['mae_first_6'] = min(long_position.get('mae_first_6', long_position['entry_price']), bar['low'])
+
+                # === DivMid TP1: 부분청산 + BE 이동 + Trailing 활성화 ===
+                if long_position.get('is_div_mid_entry') and not long_position.get('div_mid_tp1_done', False):
+                    entry_price = long_position['entry_price']
+                    initial_sl = long_position.get('initial_sl', long_position['sl'])
+                    R = entry_price - initial_sl
+                    tp1_price = entry_price + R  # RR 1:1
+
+                    if bar['high'] >= tp1_price:
+                        # TP1 도달 - 부분청산
+                        partial_ratio = self.config.div_mid_tp1_partial_pct
+                        trade = self._close_position_partial(
+                            long_position, tp1_price, 'DivMid_TP1', current_time, partial_ratio
+                        )
+                        result.trades.append(trade)
+                        equity += trade.pnl_usd
+                        result.equity_curve.append(equity)
+
+                        long_position['div_mid_tp1_done'] = True
+                        long_position['remaining'] = long_position.get('remaining', 1.0) - partial_ratio
+
+                        # SL → breakeven (entry price)
+                        long_position['sl'] = entry_price
+
+                        # Trailing 즉시 활성화
+                        long_position['trailing_activated'] = True
+
+                        print(f"    [DivMid TP1] ${tp1_price:,.0f} | Closed {partial_ratio*100:.0f}% | SL→BE=${entry_price:,.0f}")
+                        print(f"      R=${R:,.0f} (entry-SL) | Trailing activated")
 
                 # === MODE77: TP_min (2R) 부분청산 강제 - LONG ===
                 # 게이트가 2R 가능 판단했으면, 2R 도달 시 반드시 일부 수익 실현
@@ -4828,9 +4903,24 @@ class StrategyA:
                         {'5m': 300, '15m': 900, '1h': 3600, '4h': 14400}.get(self.config.anchor_tf, 900)
                     )
 
+                    # === DIV MID ENTRY: 중앙값 지정가 주문 설정 ===
+                    if pending_long_signal.get('div_mid_entry_mode') and 'entry_limit' not in pending_long_signal:
+                        mid_entry = pending_long_signal['mid_entry']
+                        signal_atr = pending_long_signal['atr']
+                        break_price = pending_long_signal['break_price']
+                        pre_sl = break_price - (self.config.div_mid_sl_atr_mult * signal_atr)
+                        pre_R = mid_entry - pre_sl
+                        pre_tp = mid_entry + pre_R  # RR 1:1 기준 TP1
+                        pending_long_signal['entry_limit'] = mid_entry
+                        pending_long_signal['pre_sl'] = pre_sl
+                        pending_long_signal['pre_tp'] = pre_tp
+                        print(f"  [DIV MID LIMIT SET] Limit=${mid_entry:,.0f} | SL=${pre_sl:,.0f} (break-1ATR) | R=${pre_R:,.0f} | TP1=${pre_tp:,.0f}")
+
                     # === 즉시 진입 체크: FIRST (만료 체크 전에 처리) ===
                     # 신호 바에서 이미 zone 터치된 경우 먼저 처리
-                    if pending_long_signal.get('zone_touched_at_signal') and 'entry_limit' not in pending_long_signal:
+                    # DivMid ON이면 limit entry 사용 → 즉시 진입 스킵 (line 4864에서 처리됨)
+                    elif (pending_long_signal.get('zone_touched_at_signal') and 'entry_limit' not in pending_long_signal
+                          and not self.config.use_div_mid_entry):
                         signal_price = pending_long_signal['zone_price']
                         signal_atr = pending_long_signal['atr']
                         # 즉시 진입: entry_limit = zone_price
@@ -5221,6 +5311,14 @@ class StrategyA:
                                 pending_long_signal = None
                                 continue
 
+                    # === MODE82: Regime Risk Mult 필터 (config 기반 BEAR 차단) ===
+                    if self.config.use_regime_aggregator and hasattr(self.config, 'regime_risk_mult'):
+                        regime_rm = self.config.regime_risk_mult.get(current_regime, 1.0)
+                        if regime_rm <= 0.0:
+                            print(f"  [LONG REJECTED] {current_time} - REGIME_RISK_MULT={regime_rm} for {current_regime}")
+                            pending_long_signal = None
+                            continue
+
                     # === ATR 변동성 필터 (Precomputed 컬럼 사용) ===
                     size_mult = 1.0
                     if self.config.use_atr_vol_filter and df_1h is not None and 'atr_pct' in df_1h.columns:
@@ -5250,13 +5348,25 @@ class StrategyA:
                         entry_price = pending_long_signal['fill_price']
                         atr = pending_long_signal['atr']
 
+                        # === DIV MID ENTRY: ATR 기반 SL (DivBreak 우회) ===
+                        if pending_long_signal.get('div_mid_entry_mode') and 'pre_sl' in pending_long_signal:
+                            sl = pending_long_signal['pre_sl']
+                            R = entry_price - sl
+                            print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (DivMid ATR-SL, R=${R:,.0f})")
+
                         # PR-MODE61: fixed_rr 또는 offset_ratio+use_micro_sl 모드에서는 pre_sl 사용 (RR 2:1 보장을 위해 재계산 금지)
                         # 단, use_div_break_sl이 활성화되면 Div Break SL 우선 사용
-                        use_pre_sl = 'pre_sl' in pending_long_signal and not self.config.use_div_break_sl and (
+                        elif 'pre_sl' in pending_long_signal and not self.config.use_div_break_sl and (
                             self.config.rr_entry_mode == "fixed_rr" or
                             (self.config.rr_entry_mode == "offset_ratio" and self.config.use_micro_sl)
-                        )
-                        if use_pre_sl:
+                        ):
+                            use_pre_sl = True
+                        else:
+                            use_pre_sl = False
+
+                        if pending_long_signal.get('div_mid_entry_mode') and 'pre_sl' in pending_long_signal:
+                            pass  # DivMid SL already set above — skip all other SL paths
+                        elif use_pre_sl:
                             sl = pending_long_signal['pre_sl']
                             actual_rr = (pending_long_signal.get('pre_tp', entry_price + atr * 2) - entry_price) / (entry_price - sl) if entry_price > sl else 0
                             print(f"  [LONG LIMIT FILLED] Entry=${entry_price:,.0f} | SL=${sl:,.0f} (pre_sl locked, RR={actual_rr:.2f})")
@@ -5493,8 +5603,16 @@ class StrategyA:
                     # PR4-R0: TP 모드에 따라 계산
                     fib_rr_rejected = False  # fib_rr 모드에서 RR 기준 미달 시 True
 
+                    # === DIV MID ENTRY: TP1 = entry + R (RR 1:1) ===
+                    if pending_long_signal.get('div_mid_entry_mode'):
+                        R = entry_price - sl  # R-based TP (SL은 break_price - 1ATR)
+                        tp1 = entry_price + R  # RR 1:1
+                        tp2 = float('inf')  # Runner: trailing stop only
+                        tp3 = float('inf')
+                        print(f"  [LONG TP] DivMid TP1=${tp1:,.0f} (entry+R, R=${R:,.0f}) | Runner: trailing")
+
                     # === MODE82: Div Break TP (RR 2:1 자동) - 최우선 ===
-                    if 'div_break_tp' in pending_long_signal:
+                    elif 'div_break_tp' in pending_long_signal:
                         tp_2r = pending_long_signal['div_break_tp']
                         tp1 = tp_2r
                         tp2 = float('inf')  # DivBreak 모드: 단일 TP 사용 (TP2/TP3 비활성화)
@@ -5816,6 +5934,8 @@ class StrategyA:
                         'is_liq_mode': self.config.use_liq_as_stop,
                         # Divergence type tracking
                         'div_type': pending_long_signal.get('div_type', 'Unknown'),
+                        # DivMid entry flag
+                        'is_div_mid_entry': pending_long_signal.get('div_mid_entry_mode', False),
                         # GateFlip hysteresis counter
                         'gateflip_count': 0,
                     }
@@ -6514,7 +6634,7 @@ class StrategyA:
                                         # MODE82: break_price 먼저 계산 (Zone 터치 전)
                                         # ENTRY TIMING FIX: 확정봉 데이터로 break_price 계산
                                         break_price_at_signal = None
-                                        if self.config.use_div_break_sl and DIV_BREAK_SL_AVAILABLE:
+                                        if (self.config.use_div_break_sl or self.config.use_div_mid_entry) and DIV_BREAK_SL_AVAILABLE:
                                             bp_result = price_where_div_breaks(
                                                 df_15m_confirmed, ref['ref_rsi'],
                                                 rsi_period=self.config.rsi_period,
@@ -6524,11 +6644,12 @@ class StrategyA:
                                                 break_price_at_signal = bp_result['break_price']
                                                 break_distance_pct = bp_result.get('distance_pct', 0)
 
-                                                # 필터: 최소 거리 체크 (R이 너무 작으면 스킵)
-                                                min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 1.0)
-                                                if break_distance_pct is not None and break_distance_pct < min_dist_pct:
-                                                    print(f"  [LONG SIGNAL SKIP] R too small: dist={break_distance_pct:.2f}% < min {min_dist_pct}%")
-                                                    continue
+                                                # 필터: 최소 거리 체크 (DivBreak SL에만 적용 — DivMid는 ATR 버퍼로 R 확보)
+                                                if self.config.use_div_break_sl:
+                                                    min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 1.0)
+                                                    if break_distance_pct is not None and break_distance_pct < min_dist_pct:
+                                                        print(f"  [LONG SIGNAL SKIP] R too small: dist={break_distance_pct:.2f}% < min {min_dist_pct}%")
+                                                        continue
 
                                                 # 필터: break_price >= zone_price면 무의미한 신호 (Zone 도달 전에 다이버전스 깨짐)
                                                 if break_price_at_signal >= long_price:
@@ -6541,9 +6662,16 @@ class StrategyA:
                                                     print(f"  [LONG SIGNAL SKIP] weak div: gap=${div_gap:,.0f} < ATR*{getattr(self.config, 'min_div_strength_atr_mult', 1.0)}=${min_gap:,.0f}")
                                                     continue
                                             else:
-                                                # DivBreak 계산 실패 → 신호 스킵
-                                                print(f"  [LONG SIGNAL SKIP] DivBreak 계산 실패 at signal time")
-                                                continue
+                                                if self.config.use_div_break_sl:
+                                                    # DivBreak SL 필요 → 정확한 break_price 없으면 스킵
+                                                    print(f"  [LONG SIGNAL SKIP] DivBreak 계산 실패 at signal time")
+                                                    continue
+                                                elif self.config.use_div_mid_entry:
+                                                    # DivMid fallback: ref_price를 break_price로 사용
+                                                    break_price_at_signal = ref['ref_price']
+                                                    # ref_price >= long_price면 무의미 → 스킵
+                                                    if break_price_at_signal >= long_price:
+                                                        continue
 
                                         # MODE82: use_div_break_sl일 때 즉시 진입
                                         # - 다이버전스 감지 시점에 즉시 진입 (현재 close)
@@ -6598,27 +6726,54 @@ class StrategyA:
                                                 # - zone_touched 조건 제거 (RSI 경계는 SL이지 Entry zone이 아님)
                                                 entry_price = df_15m_confirmed['close'].iloc[-1]  # 확정봉 종가
 
-                                                pending_long_signal = {
-                                                    'zone_price': entry_price,  # 확정봉 종가로 진입
-                                                    'fib_level': fib_level,
-                                                    'atr': current_atr,
-                                                    'touched_time': current_time,
-                                                    'div_type': div_type,
-                                                    'ref_rsi': ref['ref_rsi'],
-                                                    'ref_price': ref['ref_price'],
-                                                    'break_price': break_price_at_signal,
-                                                    'zone_touched_at_signal': True,  # 항상 즉시 진입
-                                                    'signal_bar_low': bar['low'],
-                                                    'entry_mode': 'immediate_fill',  # 항상 즉시 체결
-                                                }
+                                                # === DivMid Entry: 중앙값 지정가 매수 ===
+                                                if self.config.use_div_mid_entry and break_price_at_signal and long_price:
+                                                    mid_entry = (break_price_at_signal + long_price) / 2
+                                                    pending_long_signal = {
+                                                        'zone_price': entry_price,
+                                                        'fib_level': fib_level,
+                                                        'atr': current_atr,
+                                                        'touched_time': current_time,
+                                                        'div_type': div_type,
+                                                        'ref_rsi': ref['ref_rsi'],
+                                                        'ref_price': ref['ref_price'],
+                                                        'break_price': break_price_at_signal,
+                                                        'div_price': long_price,
+                                                        'mid_entry': mid_entry,
+                                                        'div_mid_entry_mode': True,
+                                                        'signal_bar_low': bar['low'],
+                                                    }
+                                                    signal_tf = self.config.anchor_tf
+                                                    print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [DIV MID ENTRY]")
+                                                    print(f"    REF: price=${ref['ref_price']:,.0f}, RSI={ref['ref_rsi']:.2f}")
+                                                    print(f"    break=${break_price_at_signal:,.0f} | div=${long_price:,.0f} | mid=${mid_entry:,.0f}")
+                                                    pre_sl_log = break_price_at_signal - current_atr * self.config.div_mid_sl_atr_mult
+                                                    pre_R = mid_entry - pre_sl_log
+                                                    pre_tp1 = mid_entry + pre_R
+                                                    print(f"    ATR=${current_atr:,.0f} | SL=${pre_sl_log:,.0f} (break-1ATR) | R=${pre_R:,.0f} | TP1=${pre_tp1:,.0f} (entry+R)")
+                                                else:
+                                                    pending_long_signal = {
+                                                        'zone_price': entry_price,  # 확정봉 종가로 진입
+                                                        'fib_level': fib_level,
+                                                        'atr': current_atr,
+                                                        'touched_time': current_time,
+                                                        'div_type': div_type,
+                                                        'ref_rsi': ref['ref_rsi'],
+                                                        'ref_price': ref['ref_price'],
+                                                        'break_price': break_price_at_signal,
+                                                        'zone_touched_at_signal': True,  # 항상 즉시 진입
+                                                        'signal_bar_low': bar['low'],
+                                                        'entry_mode': 'immediate_fill',  # 항상 즉시 체결
+                                                    }
                                                 signal_tf = self.config.anchor_tf
                                                 R = entry_price - break_price_at_signal
                                                 tp_2r = entry_price + 2 * R
-                                                print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
-                                                print(f"    REF: price=${ref['ref_price']:,.0f}, RSI={ref['ref_rsi']:.2f}")
-                                                print(f"    CUR: price=${cur_price:,.0f}, RSI={cur_rsi:.2f}")
-                                                print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f} (break)")
-                                                print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
+                                                if not self.config.use_div_mid_entry:
+                                                    print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
+                                                    print(f"    REF: price=${ref['ref_price']:,.0f}, RSI={ref['ref_rsi']:.2f}")
+                                                    print(f"    CUR: price=${cur_price:,.0f}, RSI={cur_rsi:.2f}")
+                                                    print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f} (break)")
+                                                    print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
                                                 if fib_level:
                                                     print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
                                             else:
@@ -6643,18 +6798,36 @@ class StrategyA:
                                                 # ENTRY TIMING FIX: Zone 터치 시 즉시 진입 가격 계산
                                                 touch_entry_price = min(bar['open'], long_price)
 
-                                                pending_long_signal = {
-                                                    'zone_price': touch_entry_price,  # ENTRY TIMING FIX: 터치 가격으로 진입
-                                                    'fib_level': fib_level,
-                                                    'atr': current_atr,
-                                                    'touched_time': current_time,
-                                                    'div_type': div_type,
-                                                    'ref_rsi': ref['ref_rsi'],  # Div Break SL용
-                                                    'ref_price': ref['ref_price'],
-                                                    'break_price': break_price_at_signal,  # 신호 시점에 계산된 break_price
-                                                    'zone_touched_at_signal': True,  # 신호 바에서 이미 zone 터치됨 → 즉시 진입
-                                                    'signal_bar_low': bar['low'],  # 디버그용
-                                                }
+                                                # === DivMid Entry: 중앙값 지정가 매수 ===
+                                                if self.config.use_div_mid_entry and break_price_at_signal and long_price:
+                                                    mid_entry = (break_price_at_signal + long_price) / 2
+                                                    pending_long_signal = {
+                                                        'zone_price': touch_entry_price,
+                                                        'fib_level': fib_level,
+                                                        'atr': current_atr,
+                                                        'touched_time': current_time,
+                                                        'div_type': div_type,
+                                                        'ref_rsi': ref['ref_rsi'],
+                                                        'ref_price': ref['ref_price'],
+                                                        'break_price': break_price_at_signal,
+                                                        'div_price': long_price,
+                                                        'mid_entry': mid_entry,
+                                                        'div_mid_entry_mode': True,
+                                                        'signal_bar_low': bar['low'],
+                                                    }
+                                                else:
+                                                    pending_long_signal = {
+                                                        'zone_price': touch_entry_price,  # ENTRY TIMING FIX: 터치 가격으로 진입
+                                                        'fib_level': fib_level,
+                                                        'atr': current_atr,
+                                                        'touched_time': current_time,
+                                                        'div_type': div_type,
+                                                        'ref_rsi': ref['ref_rsi'],  # Div Break SL용
+                                                        'ref_price': ref['ref_price'],
+                                                        'break_price': break_price_at_signal,  # 신호 시점에 계산된 break_price
+                                                        'zone_touched_at_signal': True,  # 신호 바에서 이미 zone 터치됨 → 즉시 진입
+                                                        'signal_bar_low': bar['low'],  # 디버그용
+                                                    }
                                                 signal_tf = self.config.anchor_tf
                                                 print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [ZONE TOUCH]")
                                                 print(f"    Div Price: ${long_price:,.0f} | Entry: ${touch_entry_price:,.0f} | Bar Low: ${bar['low']:,.0f}")
@@ -6696,7 +6869,7 @@ class StrategyA:
                                         if is_near and fib_level:
                                             # MODE82: break_price 먼저 계산 (Zone 터치 전)
                                             break_price_at_signal = None
-                                            if self.config.use_div_break_sl and DIV_BREAK_SL_AVAILABLE:
+                                            if (self.config.use_div_break_sl or self.config.use_div_mid_entry) and DIV_BREAK_SL_AVAILABLE:
                                                 # 5m은 15m slice 사용 (더 안정적)
                                                 bp_result = price_where_div_breaks(
                                                     df_15m_slice, ref_5m['ref_rsi'],
@@ -6805,28 +6978,56 @@ class StrategyA:
                                                     div_still_valid = bar['low'] > break_price_at_signal
 
                                                     if div_still_valid:
-                                                        pending_long_signal = {
-                                                            'zone_price': entry_price,  # 확정봉 종가로 진입
-                                                            'fib_level': fib_level,
-                                                            'atr': current_atr,
-                                                            'touched_time': current_time,
-                                                            'div_type': div_type,
-                                                            'ref_rsi': ref_hidden['ref_rsi'],
-                                                            'ref_price': ref_hidden['ref_price'],
-                                                            'break_price': break_price_at_signal,  # Hidden: max(ref_price, rsi_boundary)
-                                                            'zone_touched_at_signal': True,  # 항상 즉시 진입
-                                                            'signal_bar_low': bar['low'],
-                                                            'entry_mode': 'immediate_fill',
-                                                        }
+                                                        # === DivMid Entry: 중앙값 지정가 매수 ===
+                                                        if self.config.use_div_mid_entry and break_price_at_signal and hidden_price:
+                                                            mid_entry = (break_price_at_signal + hidden_price) / 2
+                                                            pending_long_signal = {
+                                                                'zone_price': entry_price,
+                                                                'fib_level': fib_level,
+                                                                'atr': current_atr,
+                                                                'touched_time': current_time,
+                                                                'div_type': div_type,
+                                                                'ref_rsi': ref_hidden['ref_rsi'],
+                                                                'ref_price': ref_hidden['ref_price'],
+                                                                'break_price': break_price_at_signal,
+                                                                'div_price': hidden_price,
+                                                                'mid_entry': mid_entry,
+                                                                'div_mid_entry_mode': True,
+                                                                'signal_bar_low': bar['low'],
+                                                            }
+                                                            signal_tf = self.config.anchor_tf
+                                                            ref_ts = ref_hidden.get('ref_ts', 'N/A')
+                                                            print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [DIV MID ENTRY]")
+                                                            print(f"    REF: {ref_ts} | price=${ref_hidden['ref_price']:,.0f} | RSI={ref_hidden['ref_rsi']:.2f}")
+                                                            print(f"    break=${break_price_at_signal:,.0f} | div=${hidden_price:,.0f} | mid=${mid_entry:,.0f}")
+                                                            pre_sl_log = break_price_at_signal - current_atr * self.config.div_mid_sl_atr_mult
+                                                            pre_R = mid_entry - pre_sl_log
+                                                            pre_tp1 = mid_entry + pre_R
+                                                            print(f"    ATR=${current_atr:,.0f} | SL=${pre_sl_log:,.0f} (break-1ATR) | R=${pre_R:,.0f} | TP1=${pre_tp1:,.0f} (entry+R)")
+                                                        else:
+                                                            pending_long_signal = {
+                                                                'zone_price': entry_price,  # 확정봉 종가로 진입
+                                                                'fib_level': fib_level,
+                                                                'atr': current_atr,
+                                                                'touched_time': current_time,
+                                                                'div_type': div_type,
+                                                                'ref_rsi': ref_hidden['ref_rsi'],
+                                                                'ref_price': ref_hidden['ref_price'],
+                                                                'break_price': break_price_at_signal,  # Hidden: max(ref_price, rsi_boundary)
+                                                                'zone_touched_at_signal': True,  # 항상 즉시 진입
+                                                                'signal_bar_low': bar['low'],
+                                                                'entry_mode': 'immediate_fill',
+                                                            }
                                                         signal_tf = self.config.anchor_tf
                                                         ref_ts = ref_hidden.get('ref_ts', 'N/A')
                                                         R = entry_price - break_price_at_signal
                                                         tp_2r = entry_price + 2 * R
-                                                        print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
-                                                        print(f"    REF: {ref_ts} | price=${ref_hidden['ref_price']:,.0f} | RSI={ref_hidden['ref_rsi']:.2f}")
-                                                        print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f}")
-                                                        print(f"    SL sources: ref_price=${ref_price_sl:,.0f}, rsi_boundary=${rsi_boundary_sl:,.0f}")
-                                                        print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
+                                                        if not self.config.use_div_mid_entry:
+                                                            print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
+                                                            print(f"    REF: {ref_ts} | price=${ref_hidden['ref_price']:,.0f} | RSI={ref_hidden['ref_rsi']:.2f}")
+                                                            print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f}")
+                                                            print(f"    SL sources: ref_price=${ref_price_sl:,.0f}, rsi_boundary=${rsi_boundary_sl:,.0f}")
+                                                            print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
                                                         if fib_level:
                                                             print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
 

@@ -1,11 +1,11 @@
 {
-  "_description": "MODE82: Multi-TF Regime Aggregator",
+  "_description": "MODE82: Multi-TF Regime Aggregator (1H)",
   "_strategy": "ZigZag(1W,1D) + ProbGate(4H,1H) 합의 기반 레짐 분류",
-  "_note": "싸게 사서 비싸게 팔되, 레짐에 따라 행동을 바꾼다",
+  "_note": "1h/1h 테스트: fee/R=42%, 1h ATR≈$450",
 
-  "_comment_tf": "=== 15분봉 전용 (5분봉 미사용) ===",
-  "trigger_tf": "15m",
-  "anchor_tf": "15m",
+  "_comment_tf": "=== 1시간봉 전용 ===",
+  "trigger_tf": "1h",
+  "anchor_tf": "1h",
   "use_5m_entry_fallback": false,
 
   "_comment_regime": "=== Multi-TF Regime Aggregator ===",
@@ -49,6 +49,7 @@
   "_comment_entry": "=== Entry: 레짐별 StochRSI 임계값 ===",
   "stoch_rsi_oversold": 20.0,
   "stoch_rsi_overbought": 70.0,
+  "rsi_period": 14,
   "stoch_rsi_period": 26,
   "stoch_signal_mode": "state",
   "_comment_stoch_mode": "state = 과매도 상태(StochK <= 20)일 때 신호",
@@ -80,25 +81,31 @@
   "rr_limit_price_ref": "close",
   "rr_limit_fill_on": "low",
 
-  "_comment_sl": "=== SL = 다이버전스가 깨지는 가격 ===",
-  "_comment_sl_regular": "Regular: RSI = ref_rsi 되는 가격 (이분탐색)",
-  "_comment_sl_hidden": "Hidden: ref_price (Higher Low 구조 붕괴)",
-  "use_div_break_sl": true,
+  "_comment_sl": "=== SL = Fib 기반 (DivBreak OFF → fixed_rr Fib 흐름) ===",
+  "_comment_sl_note": "DivBreak OFF → Fib 레벨 기반 SL 자동 활성화",
+  "use_div_break_sl": false,
   "div_break_max_distance_pct": 10.0,
-  "div_break_min_distance_pct": 0.3,
+  "div_break_min_distance_pct": 0.5,
   "div_break_buffer_pct": 0,
   "min_div_strength_atr_mult": 0.0,
   "use_fib_based_sl": false,
   "fib_sl_fallback_mult": 1.5,
   "fib_sl_buffer_ratio": 1.0,
 
-  "_comment_tp": "=== TP (2R 부분청산 활성화) ===",
+  "_comment_div_mid": "=== DIV MID OFF: Zone Touch + ATR TP ===",
+  "use_div_mid_entry": false,
+  "div_mid_sl_atr_mult": 1.0,
+  "div_mid_tp1_atr_mult": 1.0,
+  "div_mid_tp1_partial_pct": 0.5,
+  "div_mid_trail_atr_mult": 1.0,
+
+  "_comment_tp": "=== TP: ATR 기반 (2h ATR ≈ $700+) ===",
   "tp_mode": "atr",
-  "tp_atr_mults": [2.0, 3.0, 4.0],
-  "use_tp_min_partial": true,
+  "tp_atr_mults": [1.0, 2.0, 3.0],
+  "use_tp_min_partial": false,
   "tp_min_r_mult": 2.0,
   "tp_min_partial_pct": 0.5,
-  "_comment_tp_min": "2R 도달 시 50% 부분청산",
+  "_comment_tp_min": "SL=1ATR(2h), TP1=1ATR → RR 1:1, 50% 청산, Runner trailing",
 
   "_comment_regime_tp": "=== 레짐별 TP 설정 (RANGE=BEAR 보수적) ===",
   "regime_tp_mode": {
@@ -114,16 +121,17 @@
 
   "_comment_trailing": "=== Trailing Stop (BULL 모드) ===",
   "use_trailing_stop": true,
-  "trailing_activation_atr": 2.0,
-  "trailing_distance_atr": 1.0,
+  "trailing_activation_atr": 1.0,
+  "trailing_distance_atr": 0.5,
   "use_5m_div_trailing": false,
   "use_5m_div_partial_trailing": false,
 
   "_comment_exit": "=== Exit: 과매수 청산 (Mean Reversion) ===",
   "use_overbought_exit": true,
-  "_comment_overbought": "StochRSI >= overbought(70)이면 청산 (RR 2:1 무시)",
+  "_comment_overbought": "StochRSI >= overbought(70)이면 청산",
   "use_early_exit": true,
-  "early_exit_duration": "8h",
+  "early_exit_duration": "24h",
+  "_comment_early_exit": "2h봉 기준 12바 대기 후 MFE 부진 시 조기 청산",
   "early_exit_mfe_mult": 0.3,
   "use_gate_flip_exit": true,
   "use_opposite_div_early": true,
@@ -143,7 +151,7 @@
   "use_trend_filter_1h": false,
   "use_trend_filter_4h": false,
 
-  "_comment_regime_risk": "=== 레짐별 리스크 배수 (RANGE=BEAR 보수적) ===",
+  "_comment_regime_risk": "=== 레짐별 리스크 배수 ===",
   "regime_risk_mult": {
     "BULL": 1.0,
     "RANGE": 0.3,
@@ -163,8 +171,12 @@
   "fib_tolerance_mode": "fib_gap",
   "fib_tolerance_atr_mult": 1.0,
   "atr_tf_for_fib": "15m",
+  "_comment_atr_legacy": "atr_tf='15m' = anchor TF ATR 사용 (레거시 매핑: 15m→anchor_tf)",
 
-  "_comment_atr": "=== ATR 설정 ===",
+  "_comment_sl2": "=== SL: 1 ATR (2h anchor ATR) ===",
+  "sl_atr_mult": 1.0,
+
+  "_comment_atr": "=== ATR 설정 (anchor=2h ATR 사용) ===",
   "atr_tf_for_risk": "15m",
   "atr_period": 38
 }
