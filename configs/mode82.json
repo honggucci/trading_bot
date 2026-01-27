@@ -85,7 +85,7 @@
   "_comment_sl_hidden": "Hidden: ref_price (Higher Low 구조 붕괴)",
   "use_div_break_sl": true,
   "div_break_max_distance_pct": 10.0,
-  "div_break_min_distance_pct": 0.0,
+  "div_break_min_distance_pct": 0.3,
   "div_break_buffer_pct": 0,
   "min_div_strength_atr_mult": 0.0,
   "use_fib_based_sl": false,

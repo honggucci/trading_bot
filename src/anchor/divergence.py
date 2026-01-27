@@ -219,6 +219,11 @@ def _rsi_at_price_factory(df: pd.DataFrame, rsi_period: int = 14):
     특정 가격에서의 RSI를 계산하는 팩토리 함수
 
     마지막 봉의 종가를 주어진 가격으로 대체하여 RSI 계산.
+
+    사용법:
+    - df에 현재 봉이 포함되어 있어야 함
+    - "현재 봉이 가격 X에 마감하면 RSI는?"을 계산
+
     캐시로 성능 최적화.
     """
     base = df['close'].astype(float).to_numpy()
@@ -226,7 +231,7 @@ def _rsi_at_price_factory(df: pd.DataFrame, rsi_period: int = 14):
     @lru_cache(maxsize=256)
     def _inner(price: float) -> float:
         arr = base.copy()
-        arr[-1] = float(price)
+        arr[-1] = float(price)  # 마지막 요소를 대체
         return float(calc_rsi_wilder(arr, period=int(rsi_period))[-1])
 
     return _inner

@@ -4828,38 +4828,29 @@ class StrategyA:
                         {'5m': 300, '15m': 900, '1h': 3600, '4h': 14400}.get(self.config.anchor_tf, 900)
                     )
 
+                    # === 즉시 진입 체크: FIRST (만료 체크 전에 처리) ===
+                    # 신호 바에서 이미 zone 터치된 경우 먼저 처리
+                    if pending_long_signal.get('zone_touched_at_signal') and 'entry_limit' not in pending_long_signal:
+                        signal_price = pending_long_signal['zone_price']
+                        signal_atr = pending_long_signal['atr']
+                        # 즉시 진입: entry_limit = zone_price
+                        pending_long_signal['entry_limit'] = signal_price
+                        pending_long_signal['fill_price'] = signal_price  # 신호 바에서 zone_price에 fill
+                        is_limit_filled = True
+                        print(f"  [IMMEDIATE FILL] Zone touched at signal bar → Entry at zone_price=${signal_price:,.0f}")
+
+                    # === IMMEDIATE FILL 모드: 다음 봉으로 넘어가면 주문 삭제 ===
+                    # 즉시 진입 처리 후에도 fill_price가 없으면 (이미 처리 실패) 다음 봉에서 만료
+                    if pending_long_signal.get('entry_mode') == 'immediate_fill':
+                        if 'fill_price' not in pending_long_signal and bars_since_touch >= 1:
+                            print(f"  [LONG SIGNAL EXPIRED] {current_time} - Immediate fill 신호는 다음 봉에서 무효")
+                            pending_long_signal = None
+                            continue
+
                     if bars_since_touch > ttl_bars:
                         print(f"  [LONG LIMIT EXPIRED] {current_time} - TTL {ttl_bars} bars exceeded")
                         pending_long_signal = None  # 주문 만료
                     else:
-                        # === 즉시 진입 체크: 신호 바에서 이미 zone 터치된 경우 ===
-                        if pending_long_signal.get('zone_touched_at_signal') and 'entry_limit' not in pending_long_signal:
-                            # === StochRSI 재검증 (IMMEDIATE FILL 전) ===
-                            # 신호 바에서도 StochRSI가 과매도 상태인지 확인
-                            stoch_ok_for_fill = True
-                            if len(df_15m_slice) >= 1 and 'stoch_k' in df_15m_slice.columns:
-                                current_stoch_k = df_15m_slice['stoch_k'].iloc[-1]
-                                stoch_recheck_thr = self.config.stoch_rsi_oversold
-                                if current_regime == 'BEAR' and hasattr(self.config, 'regime_stoch_rsi'):
-                                    stoch_recheck_thr = self.config.regime_stoch_rsi.get('BEAR', 20.0)
-                                elif current_regime in ['BULL', 'RANGE'] and hasattr(self.config, 'regime_stoch_rsi'):
-                                    stoch_recheck_thr = self.config.regime_stoch_rsi.get(current_regime, 20.0)
-
-                                if current_stoch_k > stoch_recheck_thr:
-                                    stoch_ok_for_fill = False
-                                    stoch_recheck_rejects += 1
-                                    print(f"  [IMMEDIATE FILL REJECTED] {current_time} - StochRSI Recheck FAIL: {current_stoch_k:.1f} > {stoch_recheck_thr:.0f}")
-                                    pending_long_signal = None
-                                    continue
-
-                            if stoch_ok_for_fill:
-                                signal_price = pending_long_signal['zone_price']
-                                signal_atr = pending_long_signal['atr']
-                                # 즉시 진입: entry_limit = zone_price
-                                pending_long_signal['entry_limit'] = signal_price
-                                pending_long_signal['fill_price'] = signal_price  # 신호 바에서 zone_price에 fill
-                                is_limit_filled = True
-                                print(f"  [IMMEDIATE FILL] Zone touched at signal bar → Entry at zone_price=${signal_price:,.0f}")
 
                         # Limit fill 조건 체크 전에 entry_limit 계산 (아직 안했으면)
                         if 'entry_limit' not in pending_long_signal:
@@ -5252,26 +5243,6 @@ class StrategyA:
                         depth_size_mult = calc_zone_depth_size_mult(zone_depth, self.config.zone_depth_min)
                         # 필터 없음: 항상 진입, 크기만 조절 (0.25 ~ 1.0)
                         size_mult *= depth_size_mult
-
-                    # === StochRSI 재검증: 진입 시점에 여전히 과매도인지 확인 ===
-                    # 신호 생성 후 StochRSI가 회복되면 진입 취소
-                    if pending_long_signal is not None and 'fill_price' in pending_long_signal:
-                        # 현재 15m StochRSI 확인 (iloc[-1] = 현재 확정봉, 진입 시점 기준)
-                        if len(df_15m_slice) >= 1 and 'stoch_k' in df_15m_slice.columns:
-                            current_stoch_k = df_15m_slice['stoch_k'].iloc[-1]
-
-                            # 레짐 기반 threshold 적용
-                            stoch_recheck_thr = self.config.stoch_rsi_oversold  # 기본 20.0
-                            if current_regime == 'BEAR' and hasattr(self.config, 'regime_stoch_rsi'):
-                                stoch_recheck_thr = self.config.regime_stoch_rsi.get('BEAR', 20.0)
-                            elif current_regime in ['BULL', 'RANGE'] and hasattr(self.config, 'regime_stoch_rsi'):
-                                stoch_recheck_thr = self.config.regime_stoch_rsi.get(current_regime, 20.0)
-
-                            if current_stoch_k > stoch_recheck_thr:
-                                stoch_recheck_rejects += 1
-                                print(f"  [LONG REJECTED] {current_time} - StochRSI Recheck FAIL: {current_stoch_k:.1f} > {stoch_recheck_thr:.0f}")
-                                pending_long_signal = None
-                                continue
 
                     # 반등 확인! 진입
                     # PR-ENTRY-RR2: limit entry면 fill_price 사용
@@ -6620,16 +6591,15 @@ class StrategyA:
                                             if div_still_valid:
                                                 signal_diag['bar_low_touch_success'] += 1  # 진단
 
-                                                # ENTRY TIMING FIX: Zone 터치 시 즉시 진입 가격 계산
-                                                # bar['low'] <= long_price 체크 → 실제 체결 가격 = min(bar['open'], long_price)
-                                                zone_touched_now = bar['low'] <= long_price
-                                                if zone_touched_now:
-                                                    touch_entry_price = min(bar['open'], long_price)
-                                                else:
-                                                    touch_entry_price = long_price  # 아직 안 닿음 → long_price로 대기
+                                                # === ENTRY LOGIC FIX (2026-01-27) ===
+                                                # 다이버전스 성립 시 "확정봉 종가"로 즉시 진입
+                                                # - Entry = 직전 확정봉의 종가 (df_15m_confirmed)
+                                                # - SL = break_price (다이버전스가 깨지는 가격)
+                                                # - zone_touched 조건 제거 (RSI 경계는 SL이지 Entry zone이 아님)
+                                                entry_price = df_15m_confirmed['close'].iloc[-1]  # 확정봉 종가
 
                                                 pending_long_signal = {
-                                                    'zone_price': touch_entry_price,  # ENTRY TIMING FIX: 터치 가격으로 진입
+                                                    'zone_price': entry_price,  # 확정봉 종가로 진입
                                                     'fib_level': fib_level,
                                                     'atr': current_atr,
                                                     'touched_time': current_time,
@@ -6637,17 +6607,18 @@ class StrategyA:
                                                     'ref_rsi': ref['ref_rsi'],
                                                     'ref_price': ref['ref_price'],
                                                     'break_price': break_price_at_signal,
-                                                    'zone_touched_at_signal': zone_touched_now,  # 터치 여부에 따라
+                                                    'zone_touched_at_signal': True,  # 항상 즉시 진입
                                                     'signal_bar_low': bar['low'],
-                                                    'entry_mode': 'immediate_fill' if zone_touched_now else 'limit_pending',
+                                                    'entry_mode': 'immediate_fill',  # 항상 즉시 체결
                                                 }
                                                 signal_tf = self.config.anchor_tf
-                                                fill_status = "[IMMEDIATE FILL]" if zone_touched_now else "[LIMIT PENDING]"
-                                                print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) {fill_status}")
+                                                R = entry_price - break_price_at_signal
+                                                tp_2r = entry_price + 2 * R
+                                                print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
                                                 print(f"    REF: price=${ref['ref_price']:,.0f}, RSI={ref['ref_rsi']:.2f}")
                                                 print(f"    CUR: price=${cur_price:,.0f}, RSI={cur_rsi:.2f}")
-                                                print(f"    Entry: ${touch_entry_price:,.0f} (touch) | SL: ${break_price_at_signal:,.0f} (break)")
-                                                print(f"    R: ${touch_entry_price - break_price_at_signal:,.0f} | TP (2R): ${touch_entry_price + 2*(touch_entry_price-break_price_at_signal):,.0f}")
+                                                print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f} (break)")
+                                                print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
                                                 if fib_level:
                                                     print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
                                             else:
@@ -6809,44 +6780,55 @@ class StrategyA:
                                             fib_src = "disabled"
                                             if True:  # Fib Match 조건 우회
                                                 div_type = 'Hidden'
-                                                # Hidden: ref_price 기반 SL (이론대로)
-                                                # 다이버전스 깨지는 조건 = price <= ref_price (Higher Low 구조 붕괴)
+                                                # === ENTRY LOGIC FIX (2026-01-27) ===
+                                                # Hidden Div 깨지는 조건:
+                                                # 1. price <= ref_price (Higher Low 구조 붕괴)
+                                                # 2. RSI >= ref_rsi (Lower Low RSI 구조 붕괴)
+                                                # SL = max(ref_price, hidden_price) (둘 중 먼저 닿는 가격)
                                                 buffer_pct = getattr(self.config, 'div_break_buffer_pct', 0.1) / 100.0
-                                                break_price_at_signal = ref_hidden['ref_price'] * (1 - buffer_pct)
+                                                ref_price_sl = ref_hidden['ref_price'] * (1 - buffer_pct)
+                                                rsi_boundary_sl = hidden_price * (1 - buffer_pct) if hidden_price else 0
+                                                # SL = 둘 중 높은 값 (더 가까운 SL)
+                                                break_price_at_signal = max(ref_price_sl, rsi_boundary_sl)
+
+                                                # Entry = 확정봉 종가 (zone_touched 조건 제거)
+                                                entry_price = df_15m_confirmed['close'].iloc[-1]
 
                                                 # 최소 거리 필터 (R이 너무 작으면 스킵)
-                                                entry_price_estimate = hidden_price
-                                                break_distance_pct = (entry_price_estimate - break_price_at_signal) / entry_price_estimate * 100
-                                                min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 0.1)  # config 또는 0.1%
+                                                break_distance_pct = (entry_price - break_price_at_signal) / entry_price * 100
+                                                min_dist_pct = getattr(self.config, 'div_break_min_distance_pct', 0.1)
 
                                                 if break_distance_pct < min_dist_pct:
                                                     print(f"  [HIDDEN SKIP] R too small: dist={break_distance_pct:.2f}% < min {min_dist_pct}%")
                                                 else:
-                                                    # Zone 터치 + SL 유효성 체크
-                                                    zone_touched = bar['low'] <= hidden_price
+                                                    # SL 유효성 체크 (현재 저가가 SL 위에 있어야 함)
                                                     div_still_valid = bar['low'] > break_price_at_signal
 
-                                                    if zone_touched and div_still_valid:
+                                                    if div_still_valid:
                                                         pending_long_signal = {
-                                                            'zone_price': hidden_price,
+                                                            'zone_price': entry_price,  # 확정봉 종가로 진입
                                                             'fib_level': fib_level,
                                                             'atr': current_atr,
                                                             'touched_time': current_time,
                                                             'div_type': div_type,
                                                             'ref_rsi': ref_hidden['ref_rsi'],
                                                             'ref_price': ref_hidden['ref_price'],
-                                                            'break_price': break_price_at_signal,  # Hidden: ref_price 기반 SL
-                                                            'zone_touched_at_signal': True,
+                                                            'break_price': break_price_at_signal,  # Hidden: max(ref_price, rsi_boundary)
+                                                            'zone_touched_at_signal': True,  # 항상 즉시 진입
                                                             'signal_bar_low': bar['low'],
+                                                            'entry_mode': 'immediate_fill',
                                                         }
                                                         signal_tf = self.config.anchor_tf
                                                         ref_ts = ref_hidden.get('ref_ts', 'N/A')
-                                                        print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type})")
+                                                        R = entry_price - break_price_at_signal
+                                                        tp_2r = entry_price + 2 * R
+                                                        print(f"  [LONG SIGNAL] {current_time} ({signal_tf}, {div_type}) [CONFIRMED BAR ENTRY]")
                                                         print(f"    REF: {ref_ts} | price=${ref_hidden['ref_price']:,.0f} | RSI={ref_hidden['ref_rsi']:.2f}")
-                                                        print(f"    Div Price: ${hidden_price:,.0f} | Bar Low: ${bar['low']:,.0f} (ZONE TOUCHED)")
+                                                        print(f"    Entry: ${entry_price:,.0f} (confirmed close) | SL: ${break_price_at_signal:,.0f}")
+                                                        print(f"    SL sources: ref_price=${ref_price_sl:,.0f}, rsi_boundary=${rsi_boundary_sl:,.0f}")
+                                                        print(f"    R: ${R:,.0f} | TP (2R): ${tp_2r:,.0f}")
                                                         if fib_level:
                                                             print(f"    Fib Level: ${fib_level.price:,.0f} ({fib_level.fib_ratio}) [{fib_src}]")
-                                                        print(f"    Break Price (SL): ${break_price_at_signal:,.0f} (dist={break_distance_pct:.2f}%)")
 
             # Short 신호 체크 (PR4-R2: enable_short=False면 스킵)
             if self.config.enable_short and short_position is None and pending_short_signal is None and short_cooldown == 0:
