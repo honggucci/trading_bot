@@ -1026,7 +1026,7 @@ def calc_rsi_wilder(close: np.ndarray, period: int = 14) -> np.ndarray:
     close = np.asarray(close, dtype=np.float64)
     return talib.RSI(close, timeperiod=period)
 
-def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, d_period: int = 3, rsi_period: int = 14) -> np.ndarray:
+def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, rsi_period: int = 14) -> np.ndarray:
     """
     TradingView Identical StochRSI %K 계산
 
@@ -1040,7 +1040,6 @@ def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, d_per
         close: 종가 배열
         period: Stochastic 변환 기간 (기본 14, config.stoch_rsi_period)
         k_period: %K 스무딩 기간 (기본 3)
-        d_period: %D 스무딩 기간 (기본 3, 미사용)
         rsi_period: RSI 계산 기간 (기본 14, config.rsi_period)
     """
     close = np.asarray(close, dtype=np.float64)
@@ -1056,7 +1055,7 @@ def calc_stoch_rsi(close: np.ndarray, period: int = 14, k_period: int = 3, d_per
 
     denom = (hi - lo).replace(0.0, np.nan)
     stoch = (rsi_s - lo) / denom
-    stoch = stoch.clip(lower=0.0, upper=1.0).fillna(0.0)
+    stoch = stoch.clip(lower=0.0, upper=1.0).ffill().fillna(0.5)
 
     # 3. %K = SMA of stoch
     k = stoch.rolling(k_period, min_periods=k_period).mean() * 100.0
@@ -3418,8 +3417,8 @@ def load_data(tf: str, start_date: str, end_date: str, config: Config) -> pd.Dat
         df = _load_raw_ohlcv(tf, start_date, end_date)
 
     # 인디케이터 (talib 사용)
-    df['rsi'] = calc_rsi_wilder(df['close'].values, period=14)
-    df['stoch_k'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, d_period=3, rsi_period=14)
+    df['rsi'] = calc_rsi_wilder(df['close'].values, period=config.rsi_period)
+    df['stoch_k'] = calc_stoch_rsi(df['close'].values, period=config.stoch_rsi_period, k_period=3, rsi_period=config.stoch_rsi_period)
     df['atr'] = calc_atr(df['high'].values, df['low'].values, df['close'].values, period=config.atr_period)
 
     return df
@@ -3741,8 +3740,9 @@ class StrategyA:
 
                 # === MODE82: 레짐 계산 (15m 바 전환 시점에 업데이트) ===
                 if regime_aggregator is not None and df_1h_full is not None:
-                    # 1. 1H ZigZag direction 계산
-                    mask_1h = df_1h_full.index <= current_time
+                    # 1. 1H ZigZag direction 계산 (확정봉만 사용 - 미완성 1H 봉 제외)
+                    current_1h_open = current_time.floor('h')
+                    mask_1h = df_1h_full.index < current_1h_open
                     zz_1h_direction = "unknown"
                     if mask_1h.sum() >= 5:
                         df_1h_slice_full = df_1h_full[mask_1h]
@@ -3756,15 +3756,16 @@ class StrategyA:
                         )
                         zz_1h_direction = zz_1h_state.direction if zz_1h_state else "unknown"
 
-                    # 2. 15m ZigZag direction 계산
+                    # 2. 15m ZigZag direction 계산 (확정봉만 사용 - 현재 미완성 15m 봉 제외)
                     zz_15m_direction = "unknown"
-                    if len(df_15m_slice) >= 5:
-                        i_15m = len(df_15m_slice) - 1
-                        atr_15m_zz = df_15m_slice['atr'].iloc[-1] if 'atr' in df_15m_slice.columns else current_atr
+                    df_15m_confirmed = df_15m_slice.iloc[:-1] if len(df_15m_slice) > 1 else df_15m_slice
+                    if len(df_15m_confirmed) >= 5:
+                        i_15m = len(df_15m_confirmed) - 1
+                        atr_15m_zz = df_15m_confirmed['atr'].iloc[-1] if 'atr' in df_15m_confirmed.columns else current_atr
                         if pd.isna(atr_15m_zz) or not np.isfinite(atr_15m_zz):
                             atr_15m_zz = current_atr
                         zz_15m_state = update_anchor_zigzag(
-                            df_15m_slice, i_15m, zz_15m_state, atr_15m_zz,
+                            df_15m_confirmed, i_15m, zz_15m_state, atr_15m_zz,
                             reversal_mult=1.5  # 15m reversal mult
                         )
                         zz_15m_direction = zz_15m_state.direction if zz_15m_state else "unknown"
@@ -3774,8 +3775,8 @@ class StrategyA:
                     pg_5m_p_bull = 0.5
                     pg_5m_T = 1.0
                     # df_5m_slice가 아직 없으므로 df_5m[:i+1] 사용
-                    if i >= 20:
-                        returns_20 = (df_5m.iloc[i]['close'] / df_5m.iloc[i-20]['close']) - 1
+                    if i >= 21:
+                        returns_20 = (df_5m.iloc[i-1]['close'] / df_5m.iloc[i-21]['close']) - 1
                         # sigmoid 변환: z-score 기반
                         z = returns_20 / 0.02  # 2% 기준 정규화
                         pg_5m_p_bull = 1.0 / (1.0 + np.exp(-z))
@@ -4375,7 +4376,7 @@ class StrategyA:
                     elif self.config.tp_mode != "r_based":
                         long_position['sl'] = long_position['entry_price']
                     long_position['tp1_hit'] = True
-                    long_position['remaining'] = 1.0 - tp1_ratio
+                    long_position['remaining'] = long_position.get('remaining', 1.0) - tp1_ratio
                     print(f"    [TP1 HIT] ${exit_price:,.0f} | SL→BE: ${long_position['sl']:,.0f} | Closed: {tp1_ratio*100:.0f}%")
                 # TP2 체크
                 elif long_position.get('tp1_hit', False) and not long_position.get('tp2_hit', False) and bar['high'] >= long_position['tp2']:
