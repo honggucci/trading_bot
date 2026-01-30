@@ -1,12 +1,11 @@
 """
-Context Layer - 1W Fib Anchor + ATR
-===================================
+Context Layer - 1W Fib Anchor
+==============================
 
-1W 피보나치 좌표계와 ATR 계산.
+1W 피보나치 좌표계.
 
 Components:
 - cycle_anchor.py: 1W Fib 앵커 + 프랙탈 Fib 레벨
-- volatility.py: ATR 계산
 """
 from .cycle_anchor import (
     # Cycle Anchor
@@ -33,10 +32,6 @@ from .cycle_anchor import (
     get_fractal_fib_levels,
     get_nearby_fib_levels,
 )
-from .volatility import (
-    atr,
-    atr_to_zone_width,
-)
 
 __all__ = [
     # Cycle Anchor
@@ -62,7 +57,4 @@ __all__ = [
     'price_to_fib',
     'get_fractal_fib_levels',
     'get_nearby_fib_levels',
-    # Volatility
-    'atr',
-    'atr_to_zone_width',
 ]

@@ -102,7 +102,6 @@ Layer 5: Execution
 
 | Project | Path | 역할 |
 |---------|------|------|
-| legacy | ./legacy | 다이버전스 로직 원본 |
 | wpcn-backtester | ../wpcn-backtester-cli-noflask | 백테스터 + HMM Gate |
 | hattz_empire | ../../hattz_empire | AI 오케스트레이션 (RAG) |
 
@@ -113,28 +112,30 @@ Layer 5: Execution
 ```
 trading_bot/
 ├── docs/
+│   ├── MODE82_FULL_PROCESS.md    # MODE82 전체 프로세스 문서
 │   ├── SPEC_v2_integration.md
 │   └── session_backups/
 ├── src/
-│   ├── anchor/           # 15m Divergence + StochRSI + Exit
-│   ├── backtest/         # Backtest engine
-│   ├── context/          # Layer 1 (Context TFs)
-│   ├── db/               # Database utilities
-│   ├── regime/           # ProbabilityGate + HMM
-│   ├── risk/             # RiskManager
-│   ├── trigger/          # Layer 4 (5m Trigger)
-│   ├── utils/            # Timeframe utilities
-│   └── zone/             # Layer 2 (Zone Builder)
+│   ├── anchor/           # Divergence detection (divergence.py)
+│   ├── config/           # Config loader
+│   ├── context/          # 1W Fib Anchor + Dynamic Fib
+│   ├── features/         # Feature store
+│   ├── regime/           # Multi-TF Regime + ProbGate + Wave
+│   └── utils/            # Timeframe utilities
 ├── scripts/
-│   ├── backtest_strategy_compare.py
-│   ├── setup_fib_db.py
-│   ├── train_hmm_and_save.py
-│   └── update_*_data.py
+│   ├── backtest_strategy_compare.py  # MODE82 백테스트 엔진
+│   ├── train_hmm_and_save.py         # HMM 모델 학습
+│   ├── fill_1m_gaps.py               # 1m 데이터 갭 채우기
+│   └── update_*_data.py              # 데이터 업데이트 (6개)
 ├── tests/
-├── config/
+│   ├── test_timeframe.py             # 80 tests
+│   └── test_multi_tf_regime.py       # Regime aggregator tests
+├── configs/
+│   └── mode82.json                   # MODE82 설정
 ├── data/
 ├── models/
-└── legacy/               # Unused/broken modules archived
+└── legacy/
+    └── src_archived/     # v5.0에서 정리된 미사용 모듈
 ```
 
 ---
@@ -161,17 +162,14 @@ trading_bot/
 
 ---
 
-## 테스트 현황 (v4.0)
+## 테스트 현황 (v5.0)
 
 ```
 tests/
-├── test_backtest_engine.py    -  9 tests
-├── test_exit_logic.py         - 15 tests
-├── test_prob_gate.py          - 28 tests
-├── test_risk_manager.py       - 32 tests (+6 Pessimist scenarios)
-└── test_timeframe.py          - 80 tests (Duration, TF Hierarchy)
+├── test_timeframe.py          - 80 tests (Duration, TF Hierarchy)
+└── test_multi_tf_regime.py    - 13 tests (Regime Aggregator)
 ─────────────────────────────────────────────
-Total                          - 164 tests
+Total                          - 93 tests
 ```
 
 실행: `python -m pytest tests/ -v`
@@ -220,3 +218,4 @@ ProbGateConfig(
 - v3.1 (2026-01-14): RiskManager 통합, 77 tests 완료
 - v3.2 (2026-01-14): 9-Persona Critical Review 완료, 86 tests
 - v4.0 (2026-01-18): 코드 리팩토링 + Timeframe Agnostic Config, 164 tests
+- v5.0 (2026-01-30): MODE82 전용 리팩토링 - ~60,000줄 정리 (미사용 src→legacy, scripts 95개 삭제, StrategyB/legacy mode 제거)
