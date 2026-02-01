@@ -1,0 +1,196 @@
+{
+  "_description": "MODE85: Pure Mean-Reversion Accumulation (Signal-Only Exit)",
+  "_strategy": "과매도 어큐뮬레이션 → SL/TP 없음 → 과매수+약세다이버전스 시에만 청산",
+  "_note": "mode84 기반 + accum_exit_mode=signal_only, SL/TP/Trailing 비활성",
+
+  "_comment_tf": "=== 1시간봉 전용 ===",
+  "trigger_tf": "1h",
+  "anchor_tf": "1h",
+  "use_5m_entry_fallback": false,
+
+  "_comment_regime": "=== Multi-TF Regime Aggregator ===",
+  "use_regime_aggregator": true,
+
+  "regime_weights": {
+    "1w_zz": 0.40,
+    "1d_zz": 0.25,
+    "4h_pg": 0.20,
+    "1h_pg": 0.15
+  },
+
+  "zz_prior": {
+    "1w_up": 0.75,
+    "1w_down": 0.25,
+    "1d_up": 0.65,
+    "1d_down": 0.35,
+    "unknown": 0.50
+  },
+
+  "hysteresis": {
+    "bull_enter": 0.65,
+    "bull_exit": 0.55,
+    "bear_enter": 0.35,
+    "bear_exit": 0.45
+  },
+
+  "_comment_fib": "=== 1D ZigZag Fib (MODE47 기반) ===",
+  "use_dynamic_fib": true,
+  "dynamic_fib_tf": "1d",
+  "dynamic_fib_space": "log",
+  "dynamic_fib_mode": "zigzag",
+  "dynfib_lookback_bars": 100,
+  "dynfib_reversal_atr_mult": 1.5,
+  "dynfib_min_swing_atr_mult": 1.5,
+  "dynfib_confluence_with_macro": false,
+  "dynfib_confluence_tol": 0.005,
+  "dynfib_use_as": "both",
+  "dynfib_ratios": [0.236, 0.382, 0.5, 0.618, 0.786],
+
+  "_comment_entry": "=== Entry: 과매도 StochRSI < 20 + RSI 다이버전스 ===",
+  "stoch_rsi_oversold": 20.0,
+  "stoch_rsi_overbought": 80.0,
+  "rsi_period": 14,
+  "stoch_rsi_period": 26,
+  "stoch_signal_mode": "state",
+  "use_regular_div_long": true,
+  "use_hidden_div_long": true,
+  "enable_short": false,
+
+  "_comment_regime_entry": "=== 레짐별 Entry 조건 ===",
+  "regime_stoch_rsi": {
+    "BULL": 20.0,
+    "RANGE": 20.0,
+    "BEAR": 20.0
+  },
+  "regime_rsi_threshold": {
+    "BEAR": 100.0
+  },
+  "regime_require_reclaim": {
+    "BULL": false,
+    "RANGE": true,
+    "BEAR": true
+  },
+
+  "_comment_limit": "=== RR Limit Entry (진입가 최적화용, SL/TP는 signal_only에서 무시) ===",
+  "use_rr_limit_entry": true,
+  "rr_limit_target": 2.0,
+  "rr_limit_ttl": "168h",
+  "rr_limit_max_atr_dist": 999.0,
+  "rr_limit_price_ref": "close",
+  "rr_limit_fill_on": "low",
+
+  "_comment_sl": "=== SL (signal_only에서는 무시됨 - 진입가 계산용) ===",
+  "use_div_break_sl": false,
+  "div_break_max_distance_pct": 10.0,
+  "div_break_min_distance_pct": 0.5,
+  "div_break_buffer_pct": 0,
+  "min_div_strength_atr_mult": 0.0,
+  "use_fib_based_sl": false,
+  "fib_sl_fallback_mult": 1.5,
+  "fib_sl_buffer_ratio": 1.0,
+
+  "_comment_div_mid": "=== DIV MID OFF ===",
+  "use_div_mid_entry": false,
+  "div_mid_sl_atr_mult": 1.0,
+  "div_mid_tp1_atr_mult": 1.0,
+  "div_mid_tp1_partial_pct": 0.5,
+  "div_mid_trail_atr_mult": 1.0,
+
+  "_comment_tp": "=== TP (signal_only에서는 무시됨) ===",
+  "tp_mode": "atr",
+  "tp_atr_mults": [3.0, 4.5, 6.0],
+  "use_tp_min_partial": false,
+  "tp_min_r_mult": 2.0,
+  "tp_min_partial_pct": 0.5,
+
+  "_comment_regime_tp": "=== 레짐별 TP (signal_only에서는 미사용) ===",
+  "regime_tp_mode": {
+    "BULL": "trailing",
+    "RANGE": "quick_exit",
+    "BEAR": "quick_exit"
+  },
+  "regime_tp_partial_pct": {
+    "BULL": 0.50,
+    "RANGE": 1.00,
+    "BEAR": 1.00
+  },
+
+  "_comment_trailing": "=== Trailing Stop OFF (signal_only) ===",
+  "use_trailing_stop": false,
+  "trailing_activation_atr": 2.0,
+  "trailing_distance_atr": 0.5,
+  "use_5m_div_trailing": false,
+  "use_5m_div_partial_trailing": false,
+
+  "_comment_exit": "=== Exit: 모든 기존 exit OFF (signal_only가 관리) ===",
+  "use_overbought_exit": false,
+  "use_early_exit": false,
+  "early_exit_duration": "24h",
+  "early_exit_mfe_mult": 0.3,
+  "use_gate_flip_exit": false,
+  "use_opposite_div_early": false,
+  "use_5m_div_exit": false,
+  "use_15m_div_exit": false,
+
+  "_comment_accum": "=== MODE85: 순수 어큐뮬레이션 (Signal-Only Exit) ===",
+  "_comment_accum_flow": "과매도(K<20)+다이버전스 → 물타기 → 과매수(K>=80)+약세다이버전스 → 전량 매도",
+  "use_oversold_accumulation": true,
+  "accum_max_adds": 3,
+  "accum_max_notional_usd": 15000.0,
+  "accum_exit_mode": "signal_only",
+  "accum_exit_overbought_thr": 80.0,
+  "accum_exit_div_tf": "15m",
+  "accum_exit_partial_pct": 1.0,
+  "_comment_accum_legacy": "아래 값은 signal_only에서 무시됨 (진입 sizing 계산용으로만 사용)",
+  "accum_emergency_sl_atr": 8.0,
+  "accum_sl_atr_mult": 2.0,
+  "accum_tp_atr_mult": 3.0,
+
+  "_comment_safety": "=== 서킷 브레이커 (기본 OFF) ===",
+  "accum_circuit_breaker_enabled": false,
+  "accum_circuit_breaker_pct": -15.0,
+
+  "_comment_filters": "=== 필터 ===",
+  "use_regime_filter": false,
+  "use_drift_filter": false,
+  "use_rr_gate": false,
+  "use_prob_gate": false,
+  "prob_gate_temp_mode": "vol",
+  "prob_gate_p_shrink": 0.6,
+  "prob_gate_thr_long": 0.55,
+  "prob_gate_thr_short": 0.65,
+  "use_hilbert_filter": false,
+  "use_hilbert_position_filter": true,
+  "hilbert_block_long_position": "top",
+  "hilbert_block_short_position": "bottom",
+  "use_trend_filter_1h": false,
+  "use_trend_filter_4h": false,
+
+  "_comment_regime_risk": "=== 레짐별 리스크 배수 ===",
+  "regime_risk_mult": {
+    "BULL": 1.0,
+    "RANGE": 0.3,
+    "BEAR": 0.3
+  },
+
+  "_comment_sizing": "=== Fixed Risk Sizing ===",
+  "use_risk_fixed_sizing": true,
+  "risk_usd_per_trade": 25.0,
+  "max_notional_usd": 5000.0,
+  "min_sl_distance_atr_mult": 0.1,
+
+  "_comment_fib_static": "=== Static Fib (fallback) ===",
+  "fib_space": "log",
+  "fib_anchor_low": 3120.0,
+  "fib_anchor_high": 143360.0,
+  "fib_tolerance_mode": "fib_gap",
+  "fib_tolerance_atr_mult": 1.0,
+  "atr_tf_for_fib": "15m",
+
+  "_comment_sl2": "=== SL: 진입가 계산용 2.0 ATR (signal_only에서 실제 SL 미적용) ===",
+  "sl_atr_mult": 2.0,
+
+  "_comment_atr": "=== ATR 설정 ===",
+  "atr_tf_for_risk": "15m",
+  "atr_period": 38
+}

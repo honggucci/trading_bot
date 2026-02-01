@@ -230,6 +230,46 @@ def _floor_by_tf(ts: pd.Timestamp, timeframe: str) -> pd.Timestamp:
 
 
 @dataclass
+class AccumulationEntry:
+    """과매도 어큐뮬레이션 개별 진입 기록."""
+    price: float
+    qty: float
+    time: pd.Timestamp
+    atr: float
+    bar_idx: int
+    div_type: str = "Regular"
+
+
+@dataclass
+class AccumulationState:
+    """과매도 구간 분할 매수 상태 추적."""
+    entries: list = field(default_factory=list)
+    emergency_sl: float = 0.0
+    total_notional: float = 0.0
+    is_active: bool = False
+    zone_start_idx: int = -1
+
+    @property
+    def avg_price(self) -> float:
+        if not self.entries:
+            return 0.0
+        total_cost = sum(e.price * e.qty for e in self.entries)
+        total_qty = self.total_qty
+        return total_cost / total_qty if total_qty > 0 else 0.0
+
+    @property
+    def total_qty(self) -> float:
+        return sum(e.qty for e in self.entries)
+
+    def reset(self):
+        self.entries = []
+        self.emergency_sl = 0.0
+        self.total_notional = 0.0
+        self.is_active = False
+        self.zone_start_idx = -1
+
+
+@dataclass
 class Config:
     # === Timeframe Configuration (NEW) ===
     # TF 변경 시 duration 기반 설정이 자동으로 bar 수로 변환됨
@@ -565,6 +605,12 @@ class Config:
     hilbert_block_long_on_bear: bool = True   # Long: BEAR 레짐에서 차단
     hilbert_block_short_on_bull: bool = False # Short: BULL 레짐에서 차단 (느슨)
 
+    # Hilbert 사이클 포지션 필터 (OOS 검증: P1 +12.2%, P2 -6.2%, P3 +23.3%, DD 14.8%)
+    # 사이클 천장(top, 135°~225°)에서 LONG 진입 차단 → 엔트리 타이밍 개선
+    use_hilbert_position_filter: bool = False  # Hilbert 위상 포지션 필터
+    hilbert_block_long_position: str = 'top'   # LONG 차단 포지션 ('top' = 135°~225°)
+    hilbert_block_short_position: str = 'bottom'  # SHORT 차단 포지션 ('bottom' = 315°~45°)
+
     # ProbabilityGate v2 (1H Hilbert score, IC=+0.062, OOS 검증)
     # RUN_MODE=7: Hilbert 필터 대체 (교체, AND 아님)
     use_prob_gate: bool = False          # ProbabilityGate v2 사용
@@ -659,6 +705,25 @@ class Config:
     trailing_activate_r: float = 1.0      # R >= N 시 trailing 활성화
     trailing_min_atr: float = 0.8         # trailing distance 최소값 (ATR 단위)
     trailing_risk_frac: float = 0.25      # trailing distance = risk의 N% (risk = entry-SL)
+
+    # === OVERSOLD ACCUMULATION (PR-ACCUM) ===
+    # 과매도 구간 내 분할 매수 + 종료 후 평균가 기준 SL/TP 설정
+    use_oversold_accumulation: bool = False  # 마스터 플래그
+    accum_max_adds: int = 3                 # 최대 진입 횟수 (1개 과매도 세그먼트)
+    accum_emergency_sl_atr: float = 5.0     # 비상 SL = 첫진입가 - N*ATR
+    accum_sl_atr_mult: float = 1.0          # 종료 후 SL = avg_price - N*ATR
+    accum_tp_atr_mult: float = 2.0          # 종료 후 TP1 = avg_price + N*ATR
+    accum_max_notional_usd: float = 15000.0 # 총 노셔널 상한
+
+    # === OVERSOLD ACCUMULATION EXIT MODE (MODE85) ===
+    # "sl_tp"       : 기존 방식 (과매도 종료 → SL/TP 포지션 생성)
+    # "signal_only" : 순수 Mean-Reversion (SL/TP 없음, 과매수+약세다이버전스 시에만 청산)
+    accum_exit_mode: str = "sl_tp"
+    accum_exit_overbought_thr: float = 80.0      # signal_only: 과매수 임계값
+    accum_exit_div_tf: str = "15m"               # "15m" | "5m" | "both"
+    accum_exit_partial_pct: float = 1.0          # 청산 비율 (1.0 = 전량)
+    accum_circuit_breaker_enabled: bool = False   # 극단 하락 안전망
+    accum_circuit_breaker_pct: float = -15.0      # 평균가 대비 % (서킷 브레이커)
 
     # 5m Div Exit 역할 분리
     use_5m_div_loss_cut: bool = False     # 손실 상태에서 5m div로 조기 청산
@@ -1934,6 +1999,35 @@ def get_current_hilbert_regime(
             return str(regime) if pd.notna(regime) else 'RANGE'
 
     return 'RANGE'
+
+
+def get_current_hilbert_position(
+    hilbert_regimes: Optional[pd.DataFrame],
+    current_time: pd.Timestamp,
+    context_tf: str = '1h'
+) -> str:
+    """
+    현재 시간의 Hilbert 사이클 포지션 가져오기 (causal - 완료된 context_tf봉만 사용)
+
+    Returns: 'bottom', 'rising', 'top', 'falling', or 'unknown'
+    """
+    if hilbert_regimes is None or 'position' not in hilbert_regimes.columns:
+        return 'unknown'
+
+    ts_ctx = _floor_by_tf(current_time, context_tf)
+
+    if isinstance(hilbert_regimes.index, pd.DatetimeIndex):
+        if ts_ctx in hilbert_regimes.index:
+            pos = hilbert_regimes.loc[ts_ctx, 'position']
+            return str(pos) if pd.notna(pos) else 'unknown'
+
+        mask = hilbert_regimes.index <= ts_ctx
+        if mask.any():
+            closest = hilbert_regimes.index[mask][-1]
+            pos = hilbert_regimes.loc[closest, 'position']
+            return str(pos) if pd.notna(pos) else 'unknown'
+
+    return 'unknown'
 
 
 # =============================================================================
@@ -3532,6 +3626,9 @@ class StrategyA:
         long_position = None
         short_position = None
 
+        # === PR-ACCUM: 과매도 어큐뮬레이션 상태 ===
+        accum_state = AccumulationState()
+
         # 대기 신호 (존 터치됨, 반등 대기)
         pending_long_signal = None   # {'zone_price', 'boundary', 'atr', 'touched_time'}
         pending_short_signal = None
@@ -3693,7 +3790,7 @@ class StrategyA:
 
         # Hilbert 레짐 계산 (1H, causal)
         hilbert_regimes = None
-        if (self.config.use_hilbert_filter or self.config.use_regime_hidden_strategy) and df_1h is not None:
+        if (self.config.use_hilbert_filter or self.config.use_hilbert_position_filter or self.config.use_regime_hidden_strategy) and df_1h is not None:
             detrend_period = _duration_to_bars(
                 self.config.wave_regime_detrend_duration, self.config.context_tf
             )
@@ -3836,6 +3933,104 @@ class StrategyA:
                 if long_signal_triggered:
                     signal_diag['stoch_oversold_triggers'] += 1
 
+                # === PR-ACCUM: 과매도 종료 시 어큐뮬레이션 확정 ===
+                # K가 과매도 이탈하면 → 평균가 기준 포지션 생성
+                if (self.config.use_oversold_accumulation and
+                        accum_state.is_active and
+                        long_position is None and
+                        prev_confirmed_stoch > oversold_thr):
+                    avg_price = accum_state.avg_price
+                    total_qty = accum_state.total_qty
+                    last_atr = accum_state.entries[-1].atr
+                    n_entries = len(accum_state.entries)
+
+                    if self.config.accum_exit_mode == "signal_only":
+                        # MODE85: SL=0, TP=inf, 시그널 기반 청산만
+                        long_position = {
+                            'side': 'long',
+                            'entry_price': avg_price,
+                            'entry_time': accum_state.entries[0].time,
+                            'sl': 0.0,
+                            'initial_sl': 0.0,
+                            'tp1': float('inf'),
+                            'tp2': float('inf'),
+                            'tp3': float('inf'),
+                            'atr': last_atr,
+                            'qty': total_qty,
+                            'remaining': 1.0,
+                            'size_mult': 1.0,
+                            'entry_bar_idx': accum_state.zone_start_idx,
+                            'mfe': avg_price,
+                            'mae': avg_price,
+                            'mfe_first_6': avg_price,
+                            'mae_first_6': avg_price,
+                            'bars_held': 0,
+                            'sl_distance_raw': 0.0,
+                            'sl_distance_atr': 0.0,
+                            'clamped': False,
+                            'notional': accum_state.total_notional,
+                            'cap_reason': 'accum_signal_only',
+                            'leverage': self.config.leverage,
+                            'liq_price': 0.0,
+                            'is_liq_mode': False,
+                            'div_type': accum_state.entries[0].div_type,
+                            'is_div_mid_entry': False,
+                            'gateflip_count': 0,
+                            'is_accumulated': True,
+                            'accum_entries': n_entries,
+                            'is_signal_exit_only': True,
+                        }
+                        print(f"  [ACCUM FINALIZED - SIGNAL_ONLY] {current_time}")
+                        print(f"    Entries: {n_entries} | AvgPrice=${avg_price:,.0f}")
+                        print(f"    SL=NONE | TP=NONE | Exit=OB({self.config.accum_exit_overbought_thr})+BearDiv")
+                        print(f"    TotalQty={total_qty:.6f} | Notional=${accum_state.total_notional:,.0f}")
+                    else:
+                        # sl_tp: 기존 SL/TP 기반 포지션 생성
+                        accum_sl = avg_price - self.config.accum_sl_atr_mult * last_atr
+                        accum_tp1 = avg_price + self.config.accum_tp_atr_mult * last_atr
+                        accum_tp2 = avg_price + self.config.accum_tp_atr_mult * 1.5 * last_atr
+                        accum_tp3 = avg_price + self.config.accum_tp_atr_mult * 2.0 * last_atr
+
+                        long_position = {
+                            'side': 'long',
+                            'entry_price': avg_price,
+                            'entry_time': accum_state.entries[0].time,
+                            'sl': accum_sl,
+                            'initial_sl': accum_sl,
+                            'tp1': accum_tp1,
+                            'tp2': accum_tp2,
+                            'tp3': accum_tp3,
+                            'atr': last_atr,
+                            'qty': total_qty,
+                            'remaining': 1.0,
+                            'size_mult': 1.0,
+                            'entry_bar_idx': accum_state.zone_start_idx,
+                            'mfe': avg_price,
+                            'mae': avg_price,
+                            'mfe_first_6': avg_price,
+                            'mae_first_6': avg_price,
+                            'bars_held': 0,
+                            'sl_distance_raw': avg_price - accum_sl,
+                            'sl_distance_atr': self.config.accum_sl_atr_mult,
+                            'clamped': False,
+                            'notional': accum_state.total_notional,
+                            'cap_reason': 'accum',
+                            'leverage': self.config.leverage,
+                            'liq_price': 0.0,
+                            'is_liq_mode': False,
+                            'div_type': accum_state.entries[0].div_type,
+                            'is_div_mid_entry': False,
+                            'gateflip_count': 0,
+                            'is_accumulated': True,
+                            'accum_entries': n_entries,
+                        }
+                        print(f"  [ACCUM FINALIZED] {current_time}")
+                        print(f"    Entries: {n_entries} | AvgPrice=${avg_price:,.0f}")
+                        print(f"    SL=${accum_sl:,.0f} | TP1=${accum_tp1:,.0f} | TP2=${accum_tp2:,.0f} | TP3=${accum_tp3:,.0f}")
+                        print(f"    TotalQty={total_qty:.6f} | Notional=${accum_state.total_notional:,.0f}")
+
+                    accum_state.reset()
+
                 last_15m_bar_time = current_15m_bar_time
             else:
                 # 동일 15m 바 내 후속 5m 바 - 신호 비활성화 (한 번만 체크)
@@ -3915,7 +4110,7 @@ class StrategyA:
                     long_position['mae_first_6'] = min(long_position.get('mae_first_6', long_position['entry_price']), bar['low'])
 
                 # === DivMid TP1: 부분청산 + BE 이동 + Trailing 활성화 ===
-                if long_position.get('is_div_mid_entry') and not long_position.get('div_mid_tp1_done', False):
+                if long_position.get('is_div_mid_entry') and not long_position.get('div_mid_tp1_done', False) and not long_position.get('is_signal_exit_only', False):
                     entry_price = long_position['entry_price']
                     initial_sl = long_position.get('initial_sl', long_position['sl'])
                     R = entry_price - initial_sl
@@ -3945,7 +4140,7 @@ class StrategyA:
 
                 # === MODE77: TP_min (2R) 부분청산 강제 - LONG ===
                 # 게이트가 2R 가능 판단했으면, 2R 도달 시 반드시 일부 수익 실현
-                if self.config.use_tp_min_partial and not long_position.get('tp_min_partial_done', False):
+                if self.config.use_tp_min_partial and not long_position.get('tp_min_partial_done', False) and not long_position.get('is_signal_exit_only', False):
                     entry_price = long_position['entry_price']
                     initial_sl = long_position.get('initial_sl', long_position['sl'])
                     risk = entry_price - initial_sl
@@ -3973,7 +4168,7 @@ class StrategyA:
                         print(f"      planned_rr={planned_rr:.1f}, realized_rr={realized_rr:.2f}")
 
                 # === PR4-R4b: MFE 기반 브레이크이븐 + 부분익절 ===
-                if self.config.use_breakeven and not long_position.get('be_triggered', False):
+                if self.config.use_breakeven and not long_position.get('be_triggered', False) and not long_position.get('is_signal_exit_only', False):
                     entry_atr = long_position.get('atr', current_atr)
                     mfe_move = long_position['mfe'] - long_position['entry_price']
                     be_threshold = self.config.be_mfe_atr * entry_atr
@@ -3999,8 +4194,16 @@ class StrategyA:
                         print(f"      Partial exit: {partial_ratio*100:.0f}% @ ${partial_exit_price:,.0f}")
                         print(f"      SL moved: ${long_position['entry_price']:,.0f} → ${new_sl:,.0f}")
 
+                # === PR-FIX: TP1이 현재 바에서 히트 가능하면 trailing 스킵 ===
+                # trailing_activation_atr == tp_atr_mults[0] 일 때 trailing이 SL을
+                # 진입가 위로 올린 후 SL 체크가 TP보다 먼저 실행되어 TP가 영원히 도달 불가
+                _tp1_would_hit = (
+                    not long_position.get('tp1_hit', False) and
+                    bar['high'] >= long_position.get('tp1', float('inf'))
+                )
+
                 # === PR3.7: Trailing Stop (Long) ===
-                if self.config.use_trailing_stop:
+                if self.config.use_trailing_stop and not _tp1_would_hit and not long_position.get('is_signal_exit_only', False):
                     entry_atr = long_position.get('atr', current_atr)
                     mfe_move = long_position['mfe'] - long_position['entry_price']
 
@@ -4110,8 +4313,14 @@ class StrategyA:
                         print(f"      Partial exit: {partial_ratio*100:.0f}% @ ${partial_exit_price:,.0f}")
                         print(f"      SL moved: ${short_position['entry_price']:,.0f} → ${new_sl:,.0f}")
 
+                # === PR-FIX: TP1이 현재 바에서 히트 가능하면 trailing 스킵 (Short) ===
+                _tp1_would_hit_short = (
+                    not short_position.get('tp1_hit', False) and
+                    bar['low'] <= short_position.get('tp1', float('-inf'))
+                )
+
                 # === PR3.7: Trailing Stop (Short) ===
-                if self.config.use_trailing_stop:
+                if self.config.use_trailing_stop and not _tp1_would_hit_short:
                     entry_atr = short_position.get('atr', current_atr)
                     mfe_move = short_position['entry_price'] - short_position['mfe']  # Short는 반대
 
@@ -4159,8 +4368,8 @@ class StrategyA:
 
             # === Early Exit (PR3.5): SL 전 조기 청산 ===
             if self.config.use_early_exit:
-                # Long Early Exit
-                if long_position is not None:
+                # Long Early Exit (signal_only 모드에서는 스킵)
+                if long_position is not None and not long_position.get('is_signal_exit_only', False):
                     bars_held = long_position['bars_held']
                     entry_atr = long_position.get('atr', current_atr)
                     mfe_move = long_position['mfe'] - long_position['entry_price']
@@ -4299,8 +4508,115 @@ class StrategyA:
                         print(f"    [EARLY EXIT] {early_exit_reason} | bars={bars_held} | MFE=${mfe_move:.0f} | PnL=${trade.pnl_usd:.2f}")
                         short_position = None
 
+            # === PR-ACCUM: 어큐뮬레이션 비상 SL / Circuit Breaker 체크 ===
+            if self.config.use_oversold_accumulation and accum_state.is_active:
+                _accum_force_close = False
+                _accum_close_reason = ''
+                _accum_exit_price = 0.0
+
+                if self.config.accum_exit_mode == "signal_only":
+                    # signal_only: Emergency SL 없음, Circuit Breaker만 체크
+                    if self.config.accum_circuit_breaker_enabled and accum_state.avg_price > 0:
+                        drawdown_pct = (bar['low'] - accum_state.avg_price) / accum_state.avg_price * 100
+                        if drawdown_pct <= self.config.accum_circuit_breaker_pct:
+                            _accum_force_close = True
+                            _accum_close_reason = 'ACCUM_CIRCUIT_BREAKER'
+                            _accum_exit_price = bar['close']
+                else:
+                    # sl_tp: 기존 Emergency SL 로직
+                    if bar['low'] <= accum_state.emergency_sl:
+                        _accum_force_close = True
+                        _accum_close_reason = 'ACCUM_EMERGENCY_SL'
+                        _accum_exit_price = min(accum_state.emergency_sl, bar['open'])
+
+                if _accum_force_close:
+                    avg_price = accum_state.avg_price
+                    total_qty = accum_state.total_qty
+                    n_entries = len(accum_state.entries)
+
+                    temp_position = {
+                        'side': 'long',
+                        'entry_price': avg_price,
+                        'entry_time': accum_state.entries[0].time,
+                        'sl': accum_state.emergency_sl if accum_state.emergency_sl > 0 else 0.0,
+                        'initial_sl': accum_state.emergency_sl if accum_state.emergency_sl > 0 else 0.0,
+                        'atr': accum_state.entries[-1].atr,
+                        'qty': total_qty,
+                        'remaining': 1.0,
+                        'entry_bar_idx': accum_state.zone_start_idx,
+                        'mfe': max(e.price for e in accum_state.entries),
+                        'mae': min(e.price for e in accum_state.entries),
+                        'mfe_first_6': avg_price,
+                        'mae_first_6': avg_price,
+                        'bars_held': i - accum_state.zone_start_idx,
+                        'div_type': accum_state.entries[0].div_type,
+                        'sl_distance_raw': avg_price - _accum_exit_price if _accum_exit_price < avg_price else 0.0,
+                        'sl_distance_atr': self.config.accum_emergency_sl_atr if _accum_close_reason == 'ACCUM_EMERGENCY_SL' else 0.0,
+                        'clamped': False,
+                        'notional': accum_state.total_notional,
+                        'cap_reason': 'accum_emergency' if _accum_close_reason == 'ACCUM_EMERGENCY_SL' else 'accum_circuit_breaker',
+                    }
+                    trade = self._close_position_partial(
+                        temp_position, _accum_exit_price, _accum_close_reason, current_time, 1.0
+                    )
+                    result.trades.append(trade)
+                    equity += trade.pnl_usd
+                    result.equity_curve.append(equity)
+
+                    print(f"  [{_accum_close_reason}] {current_time}")
+                    print(f"    Entries: {n_entries} | AvgPrice=${avg_price:,.0f} | Exit=${_accum_exit_price:,.0f}")
+                    print(f"    PnL=${trade.pnl_usd:.2f}")
+
+                    accum_state.reset()
+                    long_cooldown = self.config.cooldown_bars
+
             # Long 청산: SL → TP1 (50%) → TP2 (30%) → TP3 (20%) → 5m 다이버전스
             if long_position is not None:
+              if long_position.get('is_signal_exit_only', False):
+                # === MODE85: signal_only exit — 과매수+약세다이버전스 시에만 청산 ===
+                _signal_exit = self._check_accum_signal_exit(df_15m_slice, df_5m_slice)
+                if _signal_exit:
+                    exit_price = bar['close']
+                    remaining = long_position.get('remaining', 1.0)
+                    close_pct = min(self.config.accum_exit_partial_pct, remaining)
+                    trade = self._close_position_partial(
+                        long_position, exit_price, 'ACCUM_SIGNAL_EXIT', current_time, close_pct
+                    )
+                    result.trades.append(trade)
+                    equity += trade.pnl_usd
+                    result.equity_curve.append(equity)
+
+                    entry_price = long_position['entry_price']
+                    pnl_pct = (exit_price - entry_price) / entry_price * 100
+                    print(f"  [ACCUM SIGNAL EXIT] {current_time}")
+                    print(f"    OB(K>={self.config.accum_exit_overbought_thr}) + BearDiv({self.config.accum_exit_div_tf})")
+                    print(f"    Entry=${entry_price:,.0f} | Exit=${exit_price:,.0f} | PnL%={pnl_pct:.2f}% | ${trade.pnl_usd:.2f}")
+
+                    if close_pct >= remaining - 0.01:
+                        long_position = None
+                    else:
+                        long_position['remaining'] -= close_pct
+
+                elif self.config.accum_circuit_breaker_enabled:
+                    # Circuit Breaker: finalize 이후 보유 중 극단 하락
+                    avg_price = long_position['entry_price']
+                    if avg_price > 0:
+                        drawdown_pct = (bar['low'] - avg_price) / avg_price * 100
+                        if drawdown_pct <= self.config.accum_circuit_breaker_pct:
+                            exit_price = bar['close']
+                            remaining = long_position.get('remaining', 1.0)
+                            trade = self._close_position_partial(
+                                long_position, exit_price, 'ACCUM_CIRCUIT_BREAKER', current_time, remaining
+                            )
+                            result.trades.append(trade)
+                            equity += trade.pnl_usd
+                            result.equity_curve.append(equity)
+                            print(f"  [CIRCUIT BREAKER] {current_time} | DD={drawdown_pct:.1f}% | PnL=${trade.pnl_usd:.2f}")
+                            long_position = None
+                            long_cooldown = self.config.cooldown_bars
+
+              else:
+                # === 기존 exit chain (SL → OB_EXIT → TP1 → TP2 → TP3 → 5m/15m Div) ===
                 # SL 체크 (최우선) - PR4-R6: LIQ 모드면 'LIQ' 라벨
                 if bar['low'] <= long_position['sl']:
                     # Gap 반영: SL 아래로 gap down 시 시가에서 청산 (보수적)
@@ -4331,30 +4647,23 @@ class StrategyA:
                     long_cooldown = self.config.cooldown_bars
                     long_position = None
                 # 과매수 청산 (Mean Reversion 전략)
-                elif self.config.use_overbought_exit:
-                    # 직전 확정봉의 StochRSI 체크
-                    current_stoch = 50.0
-                    if len(df_15m_slice) >= 2 and 'stoch_k' in df_15m_slice.columns:
-                        current_stoch = df_15m_slice['stoch_k'].iloc[-2]
-                        if not np.isfinite(current_stoch):
-                            current_stoch = 50.0
+                # PR-FIX: 실제 과매수 조건을 elif에 포함 (config 플래그만으로 elif 소비 방지)
+                elif self.config.use_overbought_exit and self._check_overbought(df_15m_slice):
+                    exit_price = bar['close']
+                    remaining = long_position.get('remaining', 1.0)
+                    trade = self._close_position_partial(long_position, exit_price, 'OB_EXIT', current_time, remaining)
 
-                    if current_stoch >= self.config.stoch_rsi_overbought:
-                        exit_price = bar['close']
-                        remaining = long_position.get('remaining', 1.0)
-                        trade = self._close_position_partial(long_position, exit_price, 'OB_EXIT', current_time, remaining)
+                    entry_price = long_position['entry_price']
+                    pnl_pct = (exit_price - entry_price) / entry_price * 100
+                    print(f"  [OVERBOUGHT EXIT] {current_time}")
+                    print(f"    StochRSI >= {self.config.stoch_rsi_overbought}")
+                    print(f"    Entry=${entry_price:,.0f} | Exit=${exit_price:,.0f} | PnL={pnl_pct:.2f}% | ${trade.pnl_usd:.2f}")
 
-                        entry_price = long_position['entry_price']
-                        pnl_pct = (exit_price - entry_price) / entry_price * 100
-                        print(f"  [OVERBOUGHT EXIT] {current_time}")
-                        print(f"    StochRSI={current_stoch:.1f} >= {self.config.stoch_rsi_overbought}")
-                        print(f"    Entry=${entry_price:,.0f} | Exit=${exit_price:,.0f} | PnL={pnl_pct:.2f}% | ${trade.pnl_usd:.2f}")
-
-                        result.trades.append(trade)
-                        equity += trade.pnl_usd
-                        result.equity_curve.append(equity)
-                        long_cooldown = self.config.cooldown_bars
-                        long_position = None
+                    result.trades.append(trade)
+                    equity += trade.pnl_usd
+                    result.equity_curve.append(equity)
+                    long_cooldown = self.config.cooldown_bars
+                    long_position = None
                 # TP1 체크 (50% 청산 + SL→Breakeven)
                 elif not long_position.get('tp1_hit', False) and bar['high'] >= long_position['tp1']:
                     exit_price = long_position['tp1']
@@ -4955,6 +5264,18 @@ class StrategyA:
                         if not pass_hilbert:
                             hilbert_filter_rejects[hilbert_reason] += 1
                             print(f"  [LONG REJECTED] {current_time} - {hilbert_reason} (Hilbert:{hilbert_regime})")
+                            pending_long_signal = None
+                            continue
+
+                    # === Hilbert 사이클 포지션 필터 (천장에서 LONG 차단) ===
+                    if self.config.use_hilbert_position_filter and hilbert_regimes is not None:
+                        h_position = get_current_hilbert_position(
+                            hilbert_regimes, current_time, self.config.context_tf
+                        )
+                        if h_position == self.config.hilbert_block_long_position:
+                            reject_key = f'HILBERT_POS_{h_position.upper()}'
+                            hilbert_filter_rejects[reject_key] = hilbert_filter_rejects.get(reject_key, 0) + 1
+                            print(f"  [LONG REJECTED] {current_time} - {reject_key} (position:{h_position})")
                             pending_long_signal = None
                             continue
 
@@ -5684,6 +6005,42 @@ class StrategyA:
                     }
                     pending_long_signal = None
 
+                    # === PR-ACCUM: 과매도 구간 내 진입 → 어큐뮬레이션에 추가 ===
+                    if self.config.use_oversold_accumulation and prev_confirmed_stoch <= oversold_thr:
+                        accum_entry = AccumulationEntry(
+                            price=long_position['entry_price'],
+                            qty=long_position['qty'],
+                            time=long_position['entry_time'],
+                            atr=long_position['atr'],
+                            bar_idx=i,
+                            div_type=long_position.get('div_type', 'Regular'),
+                        )
+                        new_notional = long_position.get('notional', accum_entry.price * accum_entry.qty)
+
+                        if not accum_state.is_active:
+                            # 첫 진입: 어큐뮬레이션 시작
+                            accum_state.is_active = True
+                            accum_state.zone_start_idx = i
+                            if self.config.accum_exit_mode == "signal_only":
+                                accum_state.emergency_sl = 0.0  # signal_only: SL 없음
+                            else:
+                                accum_state.emergency_sl = accum_entry.price - self.config.accum_emergency_sl_atr * accum_entry.atr
+                            accum_state.entries.append(accum_entry)
+                            accum_state.total_notional = new_notional
+                            esl_str = "NONE" if self.config.accum_exit_mode == "signal_only" else f"${accum_state.emergency_sl:,.0f}"
+                            print(f"  [ACCUM START] {current_time} | Price=${accum_entry.price:,.0f} | EmergencySL={esl_str}")
+                        elif len(accum_state.entries) < self.config.accum_max_adds:
+                            if accum_state.total_notional + new_notional <= self.config.accum_max_notional_usd:
+                                accum_state.entries.append(accum_entry)
+                                accum_state.total_notional += new_notional
+                                print(f"  [ACCUM ADD #{len(accum_state.entries)}] {current_time} | Price=${accum_entry.price:,.0f} | Avg=${accum_state.avg_price:,.0f} | Notional=${accum_state.total_notional:,.0f}")
+                            else:
+                                print(f"  [ACCUM SKIP] Notional limit: ${accum_state.total_notional:,.0f} + ${new_notional:,.0f} > ${self.config.accum_max_notional_usd:,.0f}")
+                        else:
+                            print(f"  [ACCUM SKIP] Max adds reached: {len(accum_state.entries)}/{self.config.accum_max_adds}")
+
+                        long_position = None  # 어큐뮬레이션 중에는 개별 포지션 없음
+
             # Short 반등 확인: 음봉 (close < open)
             if pending_short_signal is not None and short_position is None:
                 # === PR-ENTRY-RR2: RR Limit Entry 모드 (SHORT) ===
@@ -5915,6 +6272,18 @@ class StrategyA:
                         if not pass_hilbert:
                             hilbert_filter_rejects[hilbert_reason] += 1
                             print(f"  [SHORT REJECTED] {current_time} - {hilbert_reason} (Hilbert:{hilbert_regime})")
+                            pending_short_signal = None
+                            continue
+
+                    # === Hilbert 사이클 포지션 필터 (바닥에서 SHORT 차단) ===
+                    if self.config.use_hilbert_position_filter and hilbert_regimes is not None:
+                        h_position = get_current_hilbert_position(
+                            hilbert_regimes, current_time, self.config.context_tf
+                        )
+                        if h_position == self.config.hilbert_block_short_position:
+                            reject_key = f'HILBERT_POS_{h_position.upper()}'
+                            hilbert_filter_rejects[reject_key] = hilbert_filter_rejects.get(reject_key, 0) + 1
+                            print(f"  [SHORT REJECTED] {current_time} - {reject_key} (position:{h_position})")
                             pending_short_signal = None
                             continue
 
@@ -6861,6 +7230,38 @@ class StrategyA:
             equity += trade.pnl_usd
             result.equity_curve.append(equity)
 
+        # 미청산 어큐뮬레이션 정리 (과매도 구간 진행 중 백테스트 종료)
+        if self.config.use_oversold_accumulation and accum_state.is_active:
+            avg_price = accum_state.avg_price
+            total_qty = accum_state.total_qty
+            if total_qty > 0:
+                temp_position = {
+                    'side': 'long',
+                    'entry_price': avg_price,
+                    'entry_time': accum_state.entries[0].time,
+                    'sl': 0.0, 'initial_sl': 0.0,
+                    'atr': accum_state.entries[-1].atr,
+                    'qty': total_qty,
+                    'remaining': 1.0,
+                    'entry_bar_idx': accum_state.zone_start_idx,
+                    'mfe': max(e.price for e in accum_state.entries),
+                    'mae': min(e.price for e in accum_state.entries),
+                    'mfe_first_6': avg_price, 'mae_first_6': avg_price,
+                    'bars_held': len(df_5m) - 1 - accum_state.zone_start_idx,
+                    'div_type': accum_state.entries[0].div_type,
+                    'sl_distance_raw': 0.0, 'sl_distance_atr': 0.0,
+                    'clamped': False,
+                    'notional': accum_state.total_notional,
+                    'cap_reason': 'accum_eod',
+                }
+                trade = self._close_position_partial(
+                    temp_position, df_5m.iloc[-1]['close'], 'ACCUM_EOD', df_5m.index[-1], 1.0
+                )
+                result.trades.append(trade)
+                equity += trade.pnl_usd
+                result.equity_curve.append(equity)
+            accum_state.reset()
+
         # 추세 필터 통계 출력
         total_rejects = sum(trend_filter_rejects.values())
         if total_rejects > 0 or atr_vol_size_cuts > 0:
@@ -7088,6 +7489,15 @@ class StrategyA:
 
         return result
 
+    def _check_overbought(self, df_15m_slice: pd.DataFrame) -> bool:
+        """직전 확정봉 StochRSI가 과매수 임계값 이상인지 체크."""
+        if len(df_15m_slice) < 2 or 'stoch_k' not in df_15m_slice.columns:
+            return False
+        current_stoch = df_15m_slice['stoch_k'].iloc[-2]
+        if not np.isfinite(current_stoch):
+            return False
+        return current_stoch >= self.config.stoch_rsi_overbought
+
     def _check_long_divergence(self, df: pd.DataFrame) -> bool:
         """5m 롱 다이버전스 체크 - Regular만 사용"""
         ref = find_oversold_reference(df, threshold=self.config.stoch_rsi_oversold)
@@ -7113,6 +7523,32 @@ class StrategyA:
             return False
         # 현재가가 다이버전스 형성 가격 이상일 때 숏 다이버전스 확정
         return close_arr[-1] >= price
+
+    def _check_accum_signal_exit(self, df_15m_slice: pd.DataFrame, df_5m_slice: pd.DataFrame) -> bool:
+        """MODE85: 어큐뮬레이션 시그널 청산 조건 체크.
+
+        조건: StochRSI K >= accum_exit_overbought_thr AND 약세 RSI 다이버전스.
+        두 조건 모두 동시에 충족해야 함.
+        """
+        ob_thr = self.config.accum_exit_overbought_thr
+        div_tf = self.config.accum_exit_div_tf
+
+        # Step 1: 과매수 체크 (15m 확정봉 기준)
+        if len(df_15m_slice) < 2 or 'stoch_k' not in df_15m_slice.columns:
+            return False
+        confirmed_stoch = df_15m_slice['stoch_k'].iloc[-2]
+        if not np.isfinite(confirmed_stoch) or confirmed_stoch < ob_thr:
+            return False
+
+        # Step 2: 약세 다이버전스 체크
+        if div_tf == "15m":
+            return self._check_short_divergence(df_15m_slice)
+        elif div_tf == "5m":
+            return self._check_short_divergence(df_5m_slice)
+        elif div_tf == "both":
+            return (self._check_short_divergence(df_15m_slice) or
+                    self._check_short_divergence(df_5m_slice))
+        return False
 
     def _close_position(self, position: Dict, exit_price: float, reason: str, exit_time) -> Trade:
         """포지션 청산 및 Trade 생성"""
@@ -7308,6 +7744,7 @@ def main():
     print(f"  ATR Vol 사이즈 컷: {config.use_atr_vol_filter}")
     print(f"  Zone Depth 필터: {config.use_zone_depth_filter} (min={config.zone_depth_min})")
     print(f"  Hilbert 레짐 필터: {config.use_hilbert_filter}")
+    print(f"  Hilbert 포지션 필터: {config.use_hilbert_position_filter} (LONG차단={config.hilbert_block_long_position}, SHORT차단={config.hilbert_block_short_position})")
     print(f"  레짐 기반 Hidden Div: {config.use_regime_hidden_strategy}")
     print(f"  ProbabilityGate v2: {config.use_prob_gate}")
     if config.use_prob_gate:
@@ -7340,6 +7777,19 @@ def main():
     if config.use_hot_early_exit:
         print(f"    - HOT TimeStop: {config.early_exit_time_bars_hot} bars, MFE < {config.early_exit_mfe_mult_hot}*ATR")
         print(f"    - HOT StaleLoss: -{config.stale_loss_mult_hot}*ATR")
+    print(f"  과매도 어큐뮬레이션 (PR-ACCUM): {config.use_oversold_accumulation}")
+    if config.use_oversold_accumulation:
+        print(f"    - exit_mode: {config.accum_exit_mode}")
+        print(f"    - max_adds: {config.accum_max_adds}")
+        if config.accum_exit_mode == "signal_only":
+            print(f"    - SL/TP: NONE (signal-only exit)")
+            print(f"    - exit: OB(K>={config.accum_exit_overbought_thr}) + BearDiv({config.accum_exit_div_tf})")
+            print(f"    - circuit_breaker: {config.accum_circuit_breaker_enabled} ({config.accum_circuit_breaker_pct}%)")
+        else:
+            print(f"    - emergency_sl: {config.accum_emergency_sl_atr} ATR")
+            print(f"    - sl_atr_mult: {config.accum_sl_atr_mult}")
+            print(f"    - tp_atr_mult: {config.accum_tp_atr_mult}")
+        print(f"    - max_notional: ${config.accum_max_notional_usd:,.0f}")
 
     START = args.start
     END = args.end
@@ -7390,6 +7840,7 @@ def main():
 
     need_context_data = (config.use_trend_filter_1h or config.use_trend_filter_4h or
                          config.use_atr_vol_filter or config.use_hilbert_filter or
+                         config.use_hilbert_position_filter or
                          config.use_regime_hidden_strategy or config.use_prob_gate or
                          config.use_micro_sl or  # MODE78: 1H swing SL 필요
                          config.use_regime_aggregator)  # MODE82: Regime Aggregator 필요
